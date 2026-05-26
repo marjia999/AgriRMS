@@ -54,13 +54,13 @@ if (isset($_POST['update_payment'])) {
 
             if (!empty($payment['email']) && filter_var($payment['email'], FILTER_VALIDATE_EMAIL)) {
                 $subject = 'AgriRMS Invoice Update #' . $payment_id;
-                $message = \"Your payment status is now {$payment_status}.\\nInvoice: {$invoiceUrl}\\nAmount: ৳\" . number_format((float)$payment['total_amount'], 2);
-                @mail($payment['email'], $subject, $message, \"From: noreply@agrirms.com\\r\\n\");
+                $message = "Your payment status is now {$payment_status}.\nInvoice: {$invoiceUrl}\nAmount: ৳" . number_format((float)$payment['total_amount'], 2);
+                @mail($payment['email'], $subject, $message, "From: noreply@agrirms.com\r\n");
             }
         }
     }
 
-    header(\"Location: billing.php?success=updated\");
+    header("Location: billing.php?success=updated");
     exit();
 }
 
