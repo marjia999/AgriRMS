@@ -33,8 +33,21 @@ if (isset($_POST['update_status'])) {
             $should_reserve = in_array($status, $reserve_statuses, true);
 
             if (!$was_reserved && $should_reserve) {
-                $resource_stmt = mysqli_prepare($conn, "UPDATE resources SET quantity = GREATEST(quantity - ?, 0), status = CASE WHEN (quantity - ?) <= 0 THEN 'Rented' ELSE 'Available' END WHERE id = ? AND status != 'Under Maintenance'");
-                mysqli_stmt_bind_param($resource_stmt, 'iii', $requested_qty, $requested_qty, $resource_id);
+                $stock_stmt = mysqli_prepare($conn, "SELECT quantity, status FROM resources WHERE id = ? FOR UPDATE");
+                mysqli_stmt_bind_param($stock_stmt, 'i', $resource_id);
+                mysqli_stmt_execute($stock_stmt);
+                $stock = mysqli_fetch_assoc(mysqli_stmt_get_result($stock_stmt));
+
+                if (!$stock || $stock['status'] === 'Under Maintenance' || (int)$stock['quantity'] < $requested_qty) {
+                    mysqli_rollback($conn);
+                    header("Location: service_requests.php?error=stock_unavailable");
+                    exit();
+                }
+
+                $new_quantity = max(((int)$stock['quantity']) - $requested_qty, 0);
+                $new_status = $new_quantity <= 0 ? 'Rented' : 'Available';
+                $resource_stmt = mysqli_prepare($conn, "UPDATE resources SET quantity = ?, status = ? WHERE id = ?");
+                mysqli_stmt_bind_param($resource_stmt, 'isi', $new_quantity, $new_status, $resource_id);
                 mysqli_stmt_execute($resource_stmt);
             } elseif ($was_reserved && !$should_reserve && in_array($status, ['Returned', 'Cancelled'], true)) {
                 $resource_stmt = mysqli_prepare($conn, "UPDATE resources SET quantity = quantity + ?, status = CASE WHEN quantity + ? > 0 THEN 'Available' ELSE status END WHERE id = ? AND status != 'Under Maintenance'");

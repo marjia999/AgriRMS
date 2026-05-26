@@ -20,10 +20,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($stmt) {
             mysqli_stmt_bind_param($stmt, 'ssss', $name, $email, $subject, $message);
             if (mysqli_stmt_execute($stmt)) {
-                $to = 'admin@agrirms.com';
-                $mail_subject = 'New Contact Message: ' . $subject;
+                $to = getenv('AGRI_ADMIN_EMAIL') ?: '';
+                $safe_subject = str_replace(["\r", "\n"], ' ', $subject);
+                $mail_subject = 'New Contact Message: ' . $safe_subject;
                 $mail_body = "Name: $name\nEmail: $email\n\nMessage:\n$message";
-                @mail($to, $mail_subject, $mail_body, "From: noreply@agrirms.com\r\nReply-To: $email");
+                $safe_reply_to = str_replace(["\r", "\n"], '', $email);
+                if ($to !== '' && filter_var($safe_reply_to, FILTER_VALIDATE_EMAIL)) {
+                    mail($to, $mail_subject, $mail_body, "From: noreply@agrirms.com\r\nReply-To: $safe_reply_to");
+                }
                 $success = 'Thanks! Your message was sent successfully.';
             } else {
                 $error = 'Failed to save your message. Please try again.';
@@ -107,7 +111,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </main>
 
 <footer class="footer">
-    <p>&copy; <?php echo date('Y'); ?> AgriRMS. Follow us on <i class="fab fa-facebook"></i> <i class="fab fa-linkedin"></i> <i class="fab fa-youtube"></i></p>
+    <p>&copy; <?php echo date('Y'); ?> AgriRMS.</p>
+    <p>
+        <a href="https://facebook.com" aria-label="Facebook" style="color:#c0ddc0;"><i class="fab fa-facebook"></i></a>
+        <a href="https://linkedin.com" aria-label="LinkedIn" style="color:#c0ddc0; margin-left:8px;"><i class="fab fa-linkedin"></i></a>
+        <a href="https://youtube.com" aria-label="YouTube" style="color:#c0ddc0; margin-left:8px;"><i class="fab fa-youtube"></i></a>
+    </p>
 </footer>
 </body>
 </html>

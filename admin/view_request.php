@@ -22,8 +22,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     if (in_array($status, $allowed_status, true)) {
         $stmt = mysqli_prepare($conn, 'UPDATE service_requests SET request_status = ? WHERE id = ?');
         mysqli_stmt_bind_param($stmt, 'si', $status, $request_id);
-        mysqli_stmt_execute($stmt);
-        $success = 'Request status updated.';
+        if (mysqli_stmt_execute($stmt)) {
+            $success = 'Request status updated.';
+        } else {
+            $error = 'Failed to update request status.';
+        }
     }
 }
 
@@ -34,24 +37,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_comment'])) {
         if ($stmt) {
             $admin_id = (int)$_SESSION['user_id'];
             mysqli_stmt_bind_param($stmt, 'iis', $request_id, $admin_id, $comment);
-            mysqli_stmt_execute($stmt);
-            $success = 'Note added successfully.';
+            if (mysqli_stmt_execute($stmt)) {
+                $success = 'Note added successfully.';
+            } else {
+                $error = 'Failed to save note.';
+            }
         } else {
             $error = 'Could not save note. Ensure request_comments table exists.';
         }
     }
 }
 
-$request_query = mysqli_query($conn, "SELECT sr.*, u.full_name, u.email, u.phone, u.address AS client_address, r.name AS resource_name, r.model, r.type, r.daily_rate, d.delivery_type, d.location_type FROM service_requests sr JOIN users u ON sr.user_id = u.id JOIN resources r ON sr.resource_id = r.id LEFT JOIN delivery d ON sr.delivery_id = d.id WHERE sr.id = $request_id LIMIT 1");
-$request = mysqli_fetch_assoc($request_query);
+$request_stmt = mysqli_prepare($conn, "SELECT sr.*, u.full_name, u.email, u.phone, u.address AS client_address, r.name AS resource_name, r.model, r.type, r.daily_rate, d.delivery_type, d.location_type FROM service_requests sr JOIN users u ON sr.user_id = u.id JOIN resources r ON sr.resource_id = r.id LEFT JOIN delivery d ON sr.delivery_id = d.id WHERE sr.id = ? LIMIT 1");
+mysqli_stmt_bind_param($request_stmt, 'i', $request_id);
+mysqli_stmt_execute($request_stmt);
+$request = mysqli_fetch_assoc(mysqli_stmt_get_result($request_stmt));
 if (!$request) {
     header('Location: service_requests.php');
     exit();
 }
 
-$payment_query = mysqli_query($conn, "SELECT * FROM payments WHERE booking_id = $request_id ORDER BY id DESC LIMIT 1");
-$payment = mysqli_fetch_assoc($payment_query);
-$comments_query = mysqli_query($conn, "SELECT rc.*, u.full_name FROM request_comments rc LEFT JOIN users u ON rc.admin_id = u.id WHERE rc.request_id = $request_id ORDER BY rc.created_at DESC");
+$payment_stmt = mysqli_prepare($conn, "SELECT * FROM payments WHERE booking_id = ? ORDER BY id DESC LIMIT 1");
+mysqli_stmt_bind_param($payment_stmt, 'i', $request_id);
+mysqli_stmt_execute($payment_stmt);
+$payment = mysqli_fetch_assoc(mysqli_stmt_get_result($payment_stmt));
+
+$comments_stmt = mysqli_prepare($conn, "SELECT rc.*, u.full_name FROM request_comments rc LEFT JOIN users u ON rc.admin_id = u.id WHERE rc.request_id = ? ORDER BY rc.created_at DESC");
+mysqli_stmt_bind_param($comments_stmt, 'i', $request_id);
+mysqli_stmt_execute($comments_stmt);
+$comments_query = mysqli_stmt_get_result($comments_stmt);
 ?>
 <!DOCTYPE html>
 <html lang="en">

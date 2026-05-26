@@ -37,12 +37,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_maintenance'])) {
     if (mysqli_query($conn, $query)) {
         // Keep resource maintenance metadata in sync
         if ($next_maintenance_date) {
-            mysqli_query($conn, "UPDATE resources SET next_maintenance_date = '$next_maintenance_date' WHERE id = $resource_id");
+            $next_stmt = mysqli_prepare($conn, "UPDATE resources SET next_maintenance_date = ? WHERE id = ?");
+            mysqli_stmt_bind_param($next_stmt, 'si', $next_maintenance_date, $resource_id);
+            mysqli_stmt_execute($next_stmt);
         }
 
         if ($status == 'Completed' && $resource['status'] == 'Under Maintenance') {
             mysqli_query($conn, "UPDATE resources SET status = 'Available' WHERE id = $resource_id");
-        } elseif (in_array($status, ['Pending', 'In Progress'], true) && $resource['status'] == 'Available') {
+        } elseif ($status == 'In Progress' && $resource['status'] == 'Available') {
             mysqli_query($conn, "UPDATE resources SET status = 'Under Maintenance' WHERE id = $resource_id");
         }
         

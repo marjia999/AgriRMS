@@ -10,14 +10,23 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
 
 
 // Handle client delete
-if (isset($_GET['delete_id'])) {
-    $delete_id = (int)$_GET['delete_id'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
+    $delete_id = (int)$_POST['delete_id'];
     if ($delete_id > 0) {
-        $delete_stmt = mysqli_prepare($conn, "DELETE FROM users WHERE id = ? AND role = 'Client'");
-        mysqli_stmt_bind_param($delete_stmt, 'i', $delete_id);
-        mysqli_stmt_execute($delete_stmt);
+        $active_stmt = mysqli_prepare($conn, "SELECT COUNT(*) AS active_count FROM service_requests WHERE user_id = ? AND request_status IN ('Pending','Approved','Processing','Delivered')");
+        mysqli_stmt_bind_param($active_stmt, 'i', $delete_id);
+        mysqli_stmt_execute($active_stmt);
+        $active_count = mysqli_fetch_assoc(mysqli_stmt_get_result($active_stmt))['active_count'] ?? 0;
+
+        if ((int)$active_count === 0) {
+            $delete_stmt = mysqli_prepare($conn, "DELETE FROM users WHERE id = ? AND role = 'Client'");
+            mysqli_stmt_bind_param($delete_stmt, 'i', $delete_id);
+            mysqli_stmt_execute($delete_stmt);
+            header("Location: clients.php?deleted=1");
+            exit();
+        }
     }
-    header("Location: clients.php?deleted=1");
+    header("Location: clients.php?delete_blocked=1");
     exit();
 }
 
@@ -430,6 +439,11 @@ $total_spent = $total_spent_query ? mysqli_fetch_assoc($total_spent_query)['tota
             <i class="fas fa-check-circle"></i> Client deleted successfully.
         </div>
         <?php endif; ?>
+        <?php if(isset($_GET['delete_blocked'])): ?>
+        <div style="background:#fff3cd;color:#856404;padding:12px 16px;border-radius:12px;margin-bottom:16px;">
+            <i class="fas fa-info-circle"></i> Client has active requests and cannot be deleted.
+        </div>
+        <?php endif; ?>
 
         <div class="stats-grid">
             <div class="stat-card">
@@ -525,9 +539,12 @@ $total_spent = $total_spent_query ? mysqli_fetch_assoc($total_spent_query)['tota
                                 <a href="view_client.php?id=<?php echo $row['id']; ?>" class="btn-view">
                                     <i class="fas fa-eye"></i> View
                                 </a>
-                                <a href="clients.php?delete_id=<?php echo $row['id']; ?>" class="btn-view" style="background:#dc3545;margin-left:6px;" onclick="return confirm('Delete this client and all related data?');">
-                                    <i class="fas fa-trash"></i> Delete
-                                </a>
+                                <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this client account? This cannot be undone.');">
+                                    <input type="hidden" name="delete_id" value="<?php echo (int)$row['id']; ?>">
+                                    <button type="submit" class="btn-view" style="background:#dc3545;margin-left:6px;border:none;cursor:pointer;">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </button>
+                                </form>
                             </td>
                         </tr>
                         <?php endwhile; ?>

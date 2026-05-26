@@ -36,8 +36,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_resource'])) {
             mysqli_stmt_bind_param($update_req, 'issi', $delivery_id, $start_date, $end_date, $request_id);
             mysqli_stmt_execute($update_req);
 
-            $update_res = mysqli_prepare($conn, "UPDATE resources SET quantity = quantity - ?, status = CASE WHEN quantity - ? <= 0 THEN 'Rented' ELSE 'Available' END WHERE id = ?");
-            mysqli_stmt_bind_param($update_res, 'iii', $requested_qty, $requested_qty, $resource_id);
+            $new_quantity = max(((int)$res['quantity']) - $requested_qty, 0);
+            $new_status = $new_quantity <= 0 ? 'Rented' : 'Available';
+            $update_res = mysqli_prepare($conn, "UPDATE resources SET quantity = ?, status = ? WHERE id = ?");
+            mysqli_stmt_bind_param($update_res, 'isi', $new_quantity, $new_status, $resource_id);
             mysqli_stmt_execute($update_res);
 
             mysqli_commit($conn);

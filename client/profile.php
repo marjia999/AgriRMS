@@ -24,12 +24,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $new_password = $_POST['new_password'] ?? '';
         $confirm_password = $_POST['confirm_password'] ?? '';
 
-        $password_matches = password_verify($current_password, $user['password']) || $current_password === $user['password'];
+        $password_matches = password_verify($current_password, $user['password']);
 
         if (!$password_matches) {
             $error = "Current password is incorrect.";
-        } elseif (strlen($new_password) < 6) {
-            $error = "New password must be at least 6 characters.";
+        } elseif (strlen($new_password) < 8) {
+            $error = "New password must be at least 8 characters.";
         } elseif ($new_password !== $confirm_password) {
             $error = "New password and confirm password do not match.";
         } else {
@@ -43,10 +43,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         }
     } else {
-        $full_name = mysqli_real_escape_string($conn, $_POST['full_name']);
-        $phone = mysqli_real_escape_string($conn, $_POST['phone']);
-        $address = mysqli_real_escape_string($conn, $_POST['address']);
-        $email = mysqli_real_escape_string($conn, $_POST['email']);
+        $full_name = trim($_POST['full_name'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $address = trim($_POST['address'] ?? '');
+        $email = trim($_POST['email'] ?? '');
 
         $check_stmt = mysqli_prepare($conn, "SELECT id FROM users WHERE email = ? AND id != ?");
         mysqli_stmt_bind_param($check_stmt, 'si', $email, $user_id);
@@ -727,11 +727,11 @@ $completed_requests = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as
                     </div>
                     <div class="form-group">
                         <label>New Password</label>
-                        <input type="password" name="new_password" minlength="6" required>
+                        <input type="password" name="new_password" minlength="8" required>
                     </div>
                     <div class="form-group">
                         <label>Confirm New Password</label>
-                        <input type="password" name="confirm_password" minlength="6" required>
+                        <input type="password" name="confirm_password" minlength="8" required>
                     </div>
                     <button type="submit" name="change_password" class="btn-update">
                         <i class="fas fa-lock"></i> Update Password

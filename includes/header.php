@@ -1,7 +1,7 @@
 <?php
 include_once __DIR__ . '/session.php';
 $display_name = $_SESSION['full_name'] ?? trim(($_SESSION['first_name'] ?? '') . ' ' . ($_SESSION['last_name'] ?? ''));
-$display_name = $display_name !== '' ? $display_name : 'User';
+$display_name = trim((string)$display_name) !== '' ? trim((string)$display_name) : 'User';
 ?>
 <!DOCTYPE html>
 <html lang="en">
