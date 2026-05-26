@@ -30,8 +30,11 @@ $in_use_resources = $in_use_resources_query ? mysqli_fetch_assoc($in_use_resourc
 $maintenance_resources_query = mysqli_query($conn, "SELECT COUNT(*) as count FROM resources WHERE status = 'Under Maintenance'");
 $maintenance_resources = $maintenance_resources_query ? mysqli_fetch_assoc($maintenance_resources_query)['count'] : 0;
 
-$completed_requests_query = mysqli_query($conn, "SELECT COUNT(*) as count FROM service_requests WHERE request_status = 'Returned'");
-$completed_requests = $completed_requests_query ? mysqli_fetch_assoc($completed_requests_query)['count'] : 0;
+$processing_requests_query = mysqli_query($conn, "SELECT COUNT(*) as count FROM service_requests WHERE request_status = 'Processing'");
+$processing_requests = $processing_requests_query ? mysqli_fetch_assoc($processing_requests_query)['count'] : 0;
+
+$returned_requests_query = mysqli_query($conn, "SELECT COUNT(*) as count FROM service_requests WHERE request_status = 'Returned'");
+$returned_requests = $returned_requests_query ? mysqli_fetch_assoc($returned_requests_query)['count'] : 0;
 
 $pending_payments_query = mysqli_query($conn, "SELECT COUNT(*) as count FROM payments WHERE payment_status = 'Pending'");
 $pending_payments = $pending_payments_query ? mysqli_fetch_assoc($pending_payments_query)['count'] : 0;
@@ -649,7 +652,7 @@ $recent_resources = mysqli_query($conn, $recent_resources_query);
                 <div class="stat-info">
                     <h3><?php echo $total_requests; ?></h3>
                     <p>Service Requests</p>
-                    <small><?php echo $pending_requests; ?> Pending • <?php echo $completed_requests; ?> Completed</small>
+                    <small><?php echo $pending_requests; ?> Pending • <?php echo $processing_requests; ?> Processing • <?php echo $returned_requests; ?> Returned</small>
                 </div>
             </div>
             <div class="stat-card">

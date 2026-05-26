@@ -8,6 +8,19 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
     exit();
 }
 
+
+// Handle client delete
+if (isset($_GET['delete_id'])) {
+    $delete_id = (int)$_GET['delete_id'];
+    if ($delete_id > 0) {
+        $delete_stmt = mysqli_prepare($conn, "DELETE FROM users WHERE id = ? AND role = 'Client'");
+        mysqli_stmt_bind_param($delete_stmt, 'i', $delete_id);
+        mysqli_stmt_execute($delete_stmt);
+    }
+    header("Location: clients.php?deleted=1");
+    exit();
+}
+
 // Get all clients with their request counts
 $clients_query = "SELECT u.*, 
                   (SELECT COUNT(*) FROM service_requests WHERE user_id = u.id) as total_requests,
@@ -412,6 +425,12 @@ $total_spent = $total_spent_query ? mysqli_fetch_assoc($total_spent_query)['tota
 
     <div class="main-content">
         <!-- Stats Cards -->
+        <?php if(isset($_GET['deleted'])): ?>
+        <div style="background:#d4edda;color:#155724;padding:12px 16px;border-radius:12px;margin-bottom:16px;">
+            <i class="fas fa-check-circle"></i> Client deleted successfully.
+        </div>
+        <?php endif; ?>
+
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-icon">
@@ -505,6 +524,9 @@ $total_spent = $total_spent_query ? mysqli_fetch_assoc($total_spent_query)['tota
                             <td>
                                 <a href="view_client.php?id=<?php echo $row['id']; ?>" class="btn-view">
                                     <i class="fas fa-eye"></i> View
+                                </a>
+                                <a href="clients.php?delete_id=<?php echo $row['id']; ?>" class="btn-view" style="background:#dc3545;margin-left:6px;" onclick="return confirm('Delete this client and all related data?');">
+                                    <i class="fas fa-trash"></i> Delete
                                 </a>
                             </td>
                         </tr>

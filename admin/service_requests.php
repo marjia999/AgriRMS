@@ -10,9 +10,54 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
 
 // Update request status
 if (isset($_POST['update_status'])) {
-    $request_id = $_POST['request_id'];
-    $status = $_POST['status'];
-    mysqli_query($conn, "UPDATE service_requests SET request_status = '$status' WHERE id = $request_id");
+    $request_id = (int)($_POST['request_id'] ?? 0);
+    $status = $_POST['status'] ?? '';
+    $allowed_status = ['Pending', 'Approved', 'Processing', 'Delivered', 'Returned', 'Cancelled'];
+
+    if ($request_id > 0 && in_array($status, $allowed_status, true)) {
+        mysqli_begin_transaction($conn);
+
+        $request_stmt = mysqli_prepare($conn, "SELECT resource_id, quantity, request_status FROM service_requests WHERE id = ? FOR UPDATE");
+        mysqli_stmt_bind_param($request_stmt, 'i', $request_id);
+        mysqli_stmt_execute($request_stmt);
+        $request_result = mysqli_stmt_get_result($request_stmt);
+        $request_data = mysqli_fetch_assoc($request_result);
+
+        if ($request_data) {
+            $resource_id = (int)$request_data['resource_id'];
+            $requested_qty = (int)$request_data['quantity'];
+            $old_status = $request_data['request_status'];
+
+            $reserve_statuses = ['Processing', 'Delivered'];
+            $was_reserved = in_array($old_status, $reserve_statuses, true);
+            $should_reserve = in_array($status, $reserve_statuses, true);
+
+            if (!$was_reserved && $should_reserve) {
+                $resource_stmt = mysqli_prepare($conn, "UPDATE resources SET quantity = GREATEST(quantity - ?, 0), status = CASE WHEN (quantity - ?) <= 0 THEN 'Rented' ELSE 'Available' END WHERE id = ? AND status != 'Under Maintenance'");
+                mysqli_stmt_bind_param($resource_stmt, 'iii', $requested_qty, $requested_qty, $resource_id);
+                mysqli_stmt_execute($resource_stmt);
+            } elseif ($was_reserved && !$should_reserve && in_array($status, ['Returned', 'Cancelled'], true)) {
+                $resource_stmt = mysqli_prepare($conn, "UPDATE resources SET quantity = quantity + ?, status = CASE WHEN quantity + ? > 0 THEN 'Available' ELSE status END WHERE id = ? AND status != 'Under Maintenance'");
+                mysqli_stmt_bind_param($resource_stmt, 'iii', $requested_qty, $requested_qty, $resource_id);
+                mysqli_stmt_execute($resource_stmt);
+            }
+
+            if ($status === 'Approved') {
+                $admin_id = (int)$_SESSION['user_id'];
+                $update_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = ?, approved_by = ?, approved_at = NOW() WHERE id = ?");
+                mysqli_stmt_bind_param($update_stmt, 'sii', $status, $admin_id, $request_id);
+            } else {
+                $update_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = ? WHERE id = ?");
+                mysqli_stmt_bind_param($update_stmt, 'si', $status, $request_id);
+            }
+            mysqli_stmt_execute($update_stmt);
+
+            mysqli_commit($conn);
+        } else {
+            mysqli_rollback($conn);
+        }
+    }
+
     header("Location: service_requests.php");
     exit();
 }
@@ -566,6 +611,7 @@ $cancelled = $cancelled_query ? mysqli_fetch_assoc($cancelled_query)['cancelled'
                                 switch($row['request_status']) {
                                     case 'Pending': $status_class = 'status-pending'; break;
                                     case 'Approved': $status_class = 'status-approved'; break;
+                                    case 'Processing': $status_class = 'status-approved'; break;
                                     case 'Delivered': $status_class = 'status-delivered'; break;
                                     case 'Returned': $status_class = 'status-returned'; break;
                                     case 'Cancelled': $status_class = 'status-cancelled'; break;
@@ -587,6 +633,7 @@ $cancelled = $cancelled_query ? mysqli_fetch_assoc($cancelled_query)['cancelled'
                                         <select name="status" class="status-select">
                                             <option value="Pending" <?php echo $row['request_status'] == 'Pending' ? 'selected' : ''; ?>>Pending</option>
                                             <option value="Approved" <?php echo $row['request_status'] == 'Approved' ? 'selected' : ''; ?>>Approved</option>
+                                            <option value="Processing" <?php echo $row['request_status'] == 'Processing' ? 'selected' : ''; ?>>Processing</option>
                                             <option value="Delivered" <?php echo $row['request_status'] == 'Delivered' ? 'selected' : ''; ?>>Delivered</option>
                                             <option value="Returned" <?php echo $row['request_status'] == 'Returned' ? 'selected' : ''; ?>>Completed</option>
                                             <option value="Cancelled" <?php echo $row['request_status'] == 'Cancelled' ? 'selected' : ''; ?>>Cancelled</option>

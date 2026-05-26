@@ -12,7 +12,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
 $pre_selected_resource = isset($_GET['resource_id']) ? (int)$_GET['resource_id'] : 0;
 
 // Get all resources for dropdown (only available)
-$resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' ORDER BY type, name");
+$resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' AND quantity > 0 ORDER BY type, name");
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -37,11 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
     
     // Get resource details
-    $resource_query = mysqli_query($conn, "SELECT * FROM resources WHERE id = $resource_id");
+    $resource_query = mysqli_query($conn, "SELECT * FROM resources WHERE id = $resource_id AND status = 'Available' AND quantity > 0");
     $resource = mysqli_fetch_assoc($resource_query);
     
     // Check if requested quantity is available
-    if ($quantity > $resource['quantity']) {
+    if (!$resource) {
+        $error = "Selected resource is currently unavailable.";
+    } elseif ($quantity < 1) {
+        $error = "Quantity must be at least 1 unit.";
+    } elseif ($quantity > $resource['quantity']) {
         $error = "Sorry, only {$resource['quantity']} unit(s) of this resource are available. Please reduce the quantity.";
     } else {
         // Calculate total based on rental duration type
@@ -565,7 +569,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 <option value="">-- Select a resource --</option>
                                 <?php 
                                 $current_type = '';
-                                $resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' ORDER BY type, name");
+                                $resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' AND quantity > 0 ORDER BY type, name");
                                 while($resource = mysqli_fetch_assoc($resources_query)): 
                                     if($current_type != $resource['type']):
                                         if($current_type != '') echo '</optgroup>';

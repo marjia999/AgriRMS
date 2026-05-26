@@ -1,5 +1,7 @@
 <?php
-include_once 'session.php';
+include_once __DIR__ . '/session.php';
+$display_name = $_SESSION['full_name'] ?? trim(($_SESSION['first_name'] ?? '') . ' ' . ($_SESSION['last_name'] ?? ''));
+$display_name = $display_name !== '' ? $display_name : 'User';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -9,6 +11,13 @@ include_once 'session.php';
     <title>AgriRMS - Agricultural Resource Management System</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="../style.css">
+    <style>
+        @media (max-width: 768px) {
+            .header { flex-direction: column; gap: .8rem; }
+            .nav-links { flex-wrap: wrap; justify-content: center; }
+            .user-info { width: 100%; text-align: center; }
+        }
+    </style>
 </head>
 <body>
     <header class="header">
@@ -32,7 +41,7 @@ include_once 'session.php';
                     <a href="../client/payments.php">Payments</a>
                     <a href="../client/profile.php">Profile</a>
                 <?php endif; ?>
-                <span class="user-info"><i class="fas fa-user-circle"></i> <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?> (<?php echo $_SESSION['role']; ?>)</span>
+                <span class="user-info"><i class="fas fa-user-circle"></i> <?php echo htmlspecialchars($display_name); ?> (<?php echo htmlspecialchars($_SESSION['role'] ?? 'User'); ?>)</span>
                 <a href="../logout.php" class="btn btn-danger" style="padding: 0.3rem 1rem;">Logout</a>
             <?php else: ?>
                 <a href="../index.php#home">Home</a>

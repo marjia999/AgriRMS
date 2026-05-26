@@ -35,10 +35,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_maintenance'])) {
               VALUES ($resource_id, '$maintenance_type', '$maintenance_date', " . ($next_maintenance_date ? "'$next_maintenance_date'" : "NULL") . ", '$issue_description', '$work_done', '$cost', '$technician', '$status', NOW())";
     
     if (mysqli_query($conn, $query)) {
-        // Update resource status if needed
+        // Keep resource maintenance metadata in sync
+        if ($next_maintenance_date) {
+            mysqli_query($conn, "UPDATE resources SET next_maintenance_date = '$next_maintenance_date' WHERE id = $resource_id");
+        }
+
         if ($status == 'Completed' && $resource['status'] == 'Under Maintenance') {
             mysqli_query($conn, "UPDATE resources SET status = 'Available' WHERE id = $resource_id");
-        } elseif ($status == 'In Progress' && $resource['status'] == 'Available') {
+        } elseif (in_array($status, ['Pending', 'In Progress'], true) && $resource['status'] == 'Available') {
             mysqli_query($conn, "UPDATE resources SET status = 'Under Maintenance' WHERE id = $resource_id");
         }
         
