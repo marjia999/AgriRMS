@@ -1,6 +1,11 @@
 <?php
 session_start();
 include '../database.php';
+include '../includes/security.php';
+include '../includes/notifications.php';
+
+setSecurityHeaders();
+ensureNotificationsTable($conn);
 
 // Check if user is logged in and is admin
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
@@ -10,23 +15,52 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
 
 // Update payment status
 if (isset($_POST['update_payment'])) {
-    $payment_id = $_POST['payment_id'];
-    $payment_status = $_POST['payment_status'];
-    $payment_date = date('Y-m-d H:i:s');
-    
-    mysqli_query($conn, "UPDATE payments SET 
-                        payment_status = '$payment_status',
-                        payment_date = '$payment_date'
-                        WHERE id = $payment_id");
-    
-    // Also update service request payment status
-    $payment_query = mysqli_query($conn, "SELECT booking_id FROM payments WHERE id = $payment_id");
-    $payment = mysqli_fetch_assoc($payment_query);
-    if ($payment && $payment['booking_id']) {
-        mysqli_query($conn, "UPDATE service_requests SET payment_status = '$payment_status' WHERE id = " . $payment['booking_id']);
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        header("Location: billing.php?error=csrf");
+        exit();
     }
-    
-    header("Location: billing.php?success=updated");
+
+    $payment_id = (int)($_POST['payment_id'] ?? 0);
+    $payment_status = $_POST['payment_status'] ?? '';
+    $allowed_status = ['Pending', 'Paid', 'Partial', 'Failed', 'Refunded'];
+
+    if ($payment_id > 0 && in_array($payment_status, $allowed_status, true)) {
+        $payment_date = date('Y-m-d H:i:s');
+
+        $update_stmt = mysqli_prepare($conn, "UPDATE payments SET payment_status = ?, payment_date = ? WHERE id = ?");
+        mysqli_stmt_bind_param($update_stmt, 'ssi', $payment_status, $payment_date, $payment_id);
+        mysqli_stmt_execute($update_stmt);
+        mysqli_stmt_close($update_stmt);
+
+        $payment_stmt = mysqli_prepare($conn, "SELECT p.booking_id, p.user_id, p.total_amount, u.email FROM payments p LEFT JOIN users u ON p.user_id = u.id WHERE p.id = ?");
+        mysqli_stmt_bind_param($payment_stmt, 'i', $payment_id);
+        mysqli_stmt_execute($payment_stmt);
+        $payment_result = mysqli_stmt_get_result($payment_stmt);
+        $payment = $payment_result ? mysqli_fetch_assoc($payment_result) : null;
+        mysqli_stmt_close($payment_stmt);
+
+        if ($payment && $payment['booking_id']) {
+            $booking_id = (int)$payment['booking_id'];
+            $request_update = mysqli_prepare($conn, "UPDATE service_requests SET payment_status = ? WHERE id = ?");
+            mysqli_stmt_bind_param($request_update, 'si', $payment_status, $booking_id);
+            mysqli_stmt_execute($request_update);
+            mysqli_stmt_close($request_update);
+        }
+
+        if ($payment) {
+            $user_id = (int)$payment['user_id'];
+            $invoiceUrl = '../invoice.php?payment_id=' . $payment_id;
+            createNotification($conn, $user_id, 'Payment status updated', 'Payment #' . $payment_id . ' is now marked as ' . $payment_status . '.', $payment_status === 'Paid' ? 'success' : 'info', '../invoice.php?payment_id=' . $payment_id);
+
+            if (!empty($payment['email']) && filter_var($payment['email'], FILTER_VALIDATE_EMAIL)) {
+                $subject = 'AgriRMS Invoice Update #' . $payment_id;
+                $message = \"Your payment status is now {$payment_status}.\\nInvoice: {$invoiceUrl}\\nAmount: ৳\" . number_format((float)$payment['total_amount'], 2);
+                @mail($payment['email'], $subject, $message, \"From: noreply@agrirms.com\\r\\n\");
+            }
+        }
+    }
+
+    header(\"Location: billing.php?success=updated\");
     exit();
 }
 
@@ -534,6 +568,8 @@ $monthly_revenue = mysqli_query($conn, "SELECT
             <a href="logistics.php">Logistics</a>
             <a href="billing.php">Billing</a>
             <a href="clients.php">Clients</a>
+            <a href="reports.php">Reports</a>
+            <a href="notifications.php">Notifications</a>
             <a href="../logout.php" class="btn-logout">Logout</a>
         </nav>
     </header>
@@ -670,6 +706,7 @@ $monthly_revenue = mysqli_query($conn, "SELECT
                             <td>
                                 <form method="POST" class="payment-update-form">
                                     <input type="hidden" name="payment_id" value="<?php echo $row['id']; ?>">
+                                    <?php echo csrfInput(); ?>
                                     <select name="payment_status" class="status-select">
                                         <option value="Pending" <?php echo $row['payment_status'] == 'Pending' ? 'selected' : ''; ?>>Pending</option>
                                         <option value="Partial" <?php echo $row['payment_status'] == 'Partial' ? 'selected' : ''; ?>>Partial</option>
@@ -685,6 +722,9 @@ $monthly_revenue = mysqli_query($conn, "SELECT
                                     <i class="fas fa-eye"></i> View Booking
                                 </a>
                                 <?php endif; ?>
+                                <a href="../invoice.php?payment_id=<?php echo $row['id']; ?>" class="btn-view" style="margin-top: 5px; display: inline-block;">
+                                    <i class="fas fa-file-invoice"></i> Invoice
+                                </a>
                              </td
                          </tr
                         <?php endwhile; ?>

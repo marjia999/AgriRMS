@@ -1,6 +1,11 @@
 <?php
 session_start();
 include '../database.php';
+include '../includes/security.php';
+include '../includes/notifications.php';
+
+setSecurityHeaders();
+ensureNotificationsTable($conn);
 
 // Check if user is logged in and is admin
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
@@ -10,6 +15,11 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
 
 // Update request status
 if (isset($_POST['update_status'])) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        header("Location: service_requests.php?error=csrf");
+        exit();
+    }
+
     $request_id = (int)($_POST['request_id'] ?? 0);
     $status = $_POST['status'] ?? '';
     $allowed_status = ['Pending', 'Approved', 'Processing', 'Delivered', 'Returned', 'Cancelled'];
@@ -17,13 +27,14 @@ if (isset($_POST['update_status'])) {
     if ($request_id > 0 && in_array($status, $allowed_status, true)) {
         mysqli_begin_transaction($conn);
 
-        $request_stmt = mysqli_prepare($conn, "SELECT resource_id, quantity, request_status FROM service_requests WHERE id = ? FOR UPDATE");
+        $request_stmt = mysqli_prepare($conn, "SELECT user_id, resource_id, quantity, request_status FROM service_requests WHERE id = ? FOR UPDATE");
         mysqli_stmt_bind_param($request_stmt, 'i', $request_id);
         mysqli_stmt_execute($request_stmt);
         $request_result = mysqli_stmt_get_result($request_stmt);
         $request_data = mysqli_fetch_assoc($request_result);
 
         if ($request_data) {
+            $request_user_id = (int)$request_data['user_id'];
             $resource_id = (int)$request_data['resource_id'];
             $requested_qty = (int)$request_data['quantity'];
             $old_status = $request_data['request_status'];
@@ -66,6 +77,17 @@ if (isset($_POST['update_status'])) {
             mysqli_stmt_execute($update_stmt);
 
             mysqli_commit($conn);
+
+            if ($old_status !== $status) {
+                createNotification(
+                    $conn,
+                    $request_user_id,
+                    'Request status updated',
+                    'Your request #' . $request_id . ' status changed from ' . $old_status . ' to ' . $status . '.',
+                    $status === 'Cancelled' ? 'warning' : 'success',
+                    'view_request.php?id=' . $request_id
+                );
+            }
         } else {
             mysqli_rollback($conn);
         }
@@ -497,6 +519,8 @@ $cancelled = $cancelled_query ? mysqli_fetch_assoc($cancelled_query)['cancelled'
             <a href="logistics.php">Logistics</a>
             <a href="billing.php">Billing</a>
             <a href="clients.php">Clients</a>
+            <a href="reports.php">Reports</a>
+            <a href="notifications.php">Notifications</a>
             <a href="../logout.php" class="btn-logout">Logout</a>
         </nav>
     </header>
@@ -643,6 +667,7 @@ $cancelled = $cancelled_query ? mysqli_fetch_assoc($cancelled_query)['cancelled'
                                 <div class="action-buttons">
                                     <form method="POST" style="display: flex; gap: 6px; align-items: center;">
                                         <input type="hidden" name="request_id" value="<?php echo $row['id']; ?>">
+                                        <?php echo csrfInput(); ?>
                                         <select name="status" class="status-select">
                                             <option value="Pending" <?php echo $row['request_status'] == 'Pending' ? 'selected' : ''; ?>>Pending</option>
                                             <option value="Approved" <?php echo $row['request_status'] == 'Approved' ? 'selected' : ''; ?>>Approved</option>

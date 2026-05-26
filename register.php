@@ -1,6 +1,9 @@
 <?php
 session_start();
 include 'database.php';
+include 'includes/security.php';
+
+setSecurityHeaders();
 
 // Check if user is already logged in
 if (isset($_SESSION['user_id'])) {
@@ -12,26 +15,41 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $full_name = mysqli_real_escape_string($conn, $_POST['full_name']);
-    $email = mysqli_real_escape_string($conn, $_POST['email']);
-    $password = $_POST['password'];
-    $confirm_password = $_POST['confirm_password'];
-    
-    if ($password != $confirm_password) {
-        $error = "Passwords do not match!";
-    } elseif (strlen($password) < 6) {
-        $error = "Password must be at least 6 characters long!";
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Invalid request token. Please try again.';
     } else {
-        $check = mysqli_query($conn, "SELECT * FROM users WHERE email = '$email'");
-        if ($check && mysqli_num_rows($check) > 0) {
-            $error = "Email already registered!";
+        $full_name = cleanText($_POST['full_name'] ?? '', 80);
+        $email = filter_var(trim($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+        $password = $_POST['password'] ?? '';
+        $confirm_password = $_POST['confirm_password'] ?? '';
+
+        if ($full_name === '' || !$email) {
+            $error = "Please provide a valid full name and email.";
+        } elseif ($password != $confirm_password) {
+            $error = "Passwords do not match!";
+        } elseif (strlen($password) < 8) {
+            $error = "Password must be at least 8 characters long!";
         } else {
-            $query = "INSERT INTO users (full_name, email, password, role) 
-                      VALUES ('$full_name', '$email', '$password', 'Client')";
-            if (mysqli_query($conn, $query)) {
-                $success = "Registration successful! Please login.";
+            $checkStmt = mysqli_prepare($conn, "SELECT id FROM users WHERE email = ? LIMIT 1");
+            mysqli_stmt_bind_param($checkStmt, 's', $email);
+            mysqli_stmt_execute($checkStmt);
+            $checkResult = mysqli_stmt_get_result($checkStmt);
+            $exists = $checkResult && mysqli_num_rows($checkResult) > 0;
+            mysqli_stmt_close($checkStmt);
+
+            if ($exists) {
+                $error = "Email already registered!";
             } else {
-                $error = "Registration failed: " . mysqli_error($conn);
+                $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+                $insertStmt = mysqli_prepare($conn, "INSERT INTO users (full_name, email, password, role) VALUES (?, ?, ?, 'Client')");
+                mysqli_stmt_bind_param($insertStmt, 'sss', $full_name, $email, $passwordHash);
+
+                if (mysqli_stmt_execute($insertStmt)) {
+                    $success = "Registration successful! Please login.";
+                } else {
+                    $error = "Registration failed. Please try again.";
+                }
+                mysqli_stmt_close($insertStmt);
             }
         }
     }
@@ -526,6 +544,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <?php endif; ?>
 
             <form method="POST">
+                <?php echo csrfInput(); ?>
                 <div class="form-group">
                     <label>Full Name</label>
                     <div class="input-wrapper">

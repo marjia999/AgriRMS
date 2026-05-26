@@ -1,6 +1,10 @@
 <?php
 session_start();
 include '../database.php';
+include '../includes/security.php';
+include '../includes/notifications.php';
+
+setSecurityHeaders();
 
 // Check if user is logged in and is client
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
@@ -10,16 +14,97 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
 
 $user_id = $_SESSION['user_id'];
 
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS resource_wishlist (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    resource_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_wishlist_user_resource (user_id, resource_id),
+    KEY idx_wishlist_resource (resource_id),
+    CONSTRAINT fk_wishlist_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_wishlist_resource FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS resource_reviews (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    resource_id INT NOT NULL,
+    rating TINYINT NOT NULL,
+    review VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_review_user_resource (user_id, resource_id),
+    KEY idx_reviews_resource (resource_id),
+    CONSTRAINT fk_reviews_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_reviews_resource FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+
+$success = '';
+$error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Invalid request token. Please refresh and try again.';
+    } else {
+        $resource_id = (int)($_POST['resource_id'] ?? 0);
+
+        if ($resource_id > 0 && isset($_POST['toggle_wishlist'])) {
+            $existsStmt = mysqli_prepare($conn, "SELECT id FROM resource_wishlist WHERE user_id = ? AND resource_id = ?");
+            mysqli_stmt_bind_param($existsStmt, 'ii', $user_id, $resource_id);
+            mysqli_stmt_execute($existsStmt);
+            $existsResult = mysqli_stmt_get_result($existsStmt);
+            $exists = $existsResult && mysqli_num_rows($existsResult) > 0;
+            mysqli_stmt_close($existsStmt);
+
+            if ($exists) {
+                $deleteStmt = mysqli_prepare($conn, "DELETE FROM resource_wishlist WHERE user_id = ? AND resource_id = ?");
+                mysqli_stmt_bind_param($deleteStmt, 'ii', $user_id, $resource_id);
+                mysqli_stmt_execute($deleteStmt);
+                mysqli_stmt_close($deleteStmt);
+                $success = 'Removed from wishlist.';
+            } else {
+                $insertStmt = mysqli_prepare($conn, "INSERT INTO resource_wishlist (user_id, resource_id) VALUES (?, ?)");
+                mysqli_stmt_bind_param($insertStmt, 'ii', $user_id, $resource_id);
+                mysqli_stmt_execute($insertStmt);
+                mysqli_stmt_close($insertStmt);
+                $success = 'Added to wishlist.';
+            }
+        }
+
+        if ($resource_id > 0 && isset($_POST['submit_review'])) {
+            $rating = max(1, min(5, (int)($_POST['rating'] ?? 0)));
+            $review = cleanText($_POST['review'] ?? '', 500);
+
+            $reviewStmt = mysqli_prepare($conn, "INSERT INTO resource_reviews (user_id, resource_id, rating, review) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE rating = VALUES(rating), review = VALUES(review)");
+            mysqli_stmt_bind_param($reviewStmt, 'iiis', $user_id, $resource_id, $rating, $review);
+            mysqli_stmt_execute($reviewStmt);
+            mysqli_stmt_close($reviewStmt);
+            $success = 'Your review was saved.';
+        }
+    }
+}
+
 // Get filter type from URL
 $filter_type = isset($_GET['type']) ? mysqli_real_escape_string($conn, $_GET['type']) : '';
 $filter_status = isset($_GET['status']) ? mysqli_real_escape_string($conn, $_GET['status']) : '';
 
 // Build query - Client can only see Available resources
-$query = "SELECT * FROM resources WHERE status = 'Available'";
+$query = "SELECT r.*, 
+          COALESCE(rv.avg_rating, 0) AS avg_rating,
+          COALESCE(rv.review_count, 0) AS review_count,
+          CASE WHEN rw.id IS NULL THEN 0 ELSE 1 END AS in_wishlist
+          FROM resources r
+          LEFT JOIN (
+             SELECT resource_id, AVG(rating) AS avg_rating, COUNT(*) AS review_count
+             FROM resource_reviews
+             GROUP BY resource_id
+          ) rv ON rv.resource_id = r.id
+          LEFT JOIN resource_wishlist rw ON rw.resource_id = r.id AND rw.user_id = $user_id
+          WHERE r.status = 'Available'";
 if ($filter_type && $filter_type != 'All') {
-    $query .= " AND type = '$filter_type'";
+    $query .= " AND r.type = '$filter_type'";
 }
-$query .= " ORDER BY type, name ASC";
+$query .= " ORDER BY r.type, r.name ASC";
 $resources = mysqli_query($conn, $query);
 
 // Get unique types for filter dropdown (only from available resources)
@@ -338,6 +423,58 @@ foreach($all_types as $type) {
             box-shadow: 0 5px 15px rgba(255,140,66,0.3);
         }
 
+        .resource-actions {
+            display: grid;
+            gap: 0.6rem;
+        }
+
+        .btn-secondary {
+            width: 100%;
+            background: #1B4F2B;
+            color: #fff;
+            padding: 0.6rem;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .rating-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            margin: 0.5rem 0;
+            color: #4b5f4f;
+        }
+
+        .review-form {
+            margin-top: 0.6rem;
+            padding-top: 0.6rem;
+            border-top: 1px dashed #dce7dc;
+            display: grid;
+            gap: 0.45rem;
+        }
+
+        .review-form select,
+        .review-form textarea {
+            width: 100%;
+            border: 1px solid #dce7dc;
+            border-radius: 10px;
+            padding: 0.5rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+        }
+
+        .alert {
+            padding: 0.8rem 1rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-error { background: #f8d7da; color: #842029; }
+
         .status-badge {
             display: inline-block;
             padding: 3px 10px;
@@ -435,6 +572,8 @@ foreach($all_types as $type) {
             <a href="request_service.php">New Request</a>
             <a href="my_requests.php">My Requests</a>
             <a href="payments.php">Payments</a>
+            <a href="wishlist.php">Wishlist</a>
+            <a href="notifications.php">Notifications</a>
             <a href="profile.php">Profile</a>
             <a href="../logout.php" class="btn-logout">Logout</a>
         </nav>
@@ -448,6 +587,8 @@ foreach($all_types as $type) {
             </h1>
             <p>Browse and rent agricultural equipment, machinery, and storage solutions</p>
         </div>
+        <?php if ($success): ?><div class="alert alert-success"><?php echo htmlspecialchars($success); ?></div><?php endif; ?>
+        <?php if ($error): ?><div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
         <!-- Filter Bar -->
         <div class="filter-bar">
@@ -540,9 +681,37 @@ foreach($all_types as $type) {
                         </div>
                         <?php endif; ?>
                     </div>
-                    <a href="request_service.php?resource_id=<?php echo $resource['id']; ?>" class="btn-request">
-                        <i class="fas fa-calendar-alt"></i> Request This Resource
-                    </a>
+                    <div class="rating-row">
+                        <span><i class="fas fa-star" style="color:#FF8C42;"></i> <?php echo number_format((float)$resource['avg_rating'], 1); ?>/5</span>
+                        <span><?php echo (int)$resource['review_count']; ?> review(s)</span>
+                    </div>
+                    <div class="resource-actions">
+                        <a href="request_service.php?resource_id=<?php echo $resource['id']; ?>" class="btn-request">
+                            <i class="fas fa-calendar-alt"></i> Request This Resource
+                        </a>
+                        <form method="POST">
+                            <?php echo csrfInput(); ?>
+                            <input type="hidden" name="resource_id" value="<?php echo (int)$resource['id']; ?>">
+                            <button type="submit" name="toggle_wishlist" class="btn-secondary">
+                                <i class="fas fa-heart"></i>
+                                <?php echo (int)$resource['in_wishlist'] === 1 ? 'Remove from Wishlist' : 'Add to Wishlist'; ?>
+                            </button>
+                        </form>
+                    </div>
+                    <form class="review-form" method="POST">
+                        <?php echo csrfInput(); ?>
+                        <input type="hidden" name="resource_id" value="<?php echo (int)$resource['id']; ?>">
+                        <select name="rating" required>
+                            <option value="">Rate this resource</option>
+                            <option value="5">5 - Excellent</option>
+                            <option value="4">4 - Good</option>
+                            <option value="3">3 - Average</option>
+                            <option value="2">2 - Poor</option>
+                            <option value="1">1 - Very Poor</option>
+                        </select>
+                        <textarea name="review" rows="2" maxlength="500" placeholder="Share your experience (optional)"></textarea>
+                        <button type="submit" name="submit_review" class="btn-secondary"><i class="fas fa-star"></i> Save Review</button>
+                    </form>
                 </div>
             </div>
             <?php endwhile; ?>
