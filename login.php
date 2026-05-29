@@ -1,6 +1,9 @@
 <?php
 session_start();
 include 'database.php';
+include 'includes/security.php';
+
+setSecurityHeaders();
 
 // Check if user is already logged in
 if (isset($_SESSION['user_id'])) {
@@ -14,39 +17,54 @@ if (isset($_SESSION['user_id'])) {
 
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $email = mysqli_real_escape_string($conn, $_POST['email']);
-    $password = $_POST['password'];
-    
-    // Query to get user by email only (don't include password in WHERE clause for security)
-    $query = "SELECT * FROM users WHERE email = '$email'";
-    $result = mysqli_query($conn, $query);
-    
-    // Check if query was successful
-    if ($result && mysqli_num_rows($result) == 1) {
-        $user = mysqli_fetch_assoc($result);
-        
-        // Verify password (plain text comparison since that's likely how it's stored)
-        if ($password == $user['password']) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['full_name'] = $user['full_name'];
-            // Split full_name into first_name and last_name for compatibility
-            $name_parts = explode(' ', $user['full_name'], 2);
-            $_SESSION['first_name'] = $name_parts[0];
-            $_SESSION['last_name'] = isset($name_parts[1]) ? $name_parts[1] : '';
-            $_SESSION['email'] = $user['email'];
-            $_SESSION['role'] = $user['role'];
-            
-            if ($user['role'] == 'Admin') {
-                header("Location: admin/dashboard.php");
-            } else {
-                header("Location: client/dashboard.php");
-            }
-            exit();
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Invalid request token. Please try again.';
+    } else {
+        $email = filter_var(trim($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+        $password = $_POST['password'] ?? '';
+
+        if (!$email || $password === '') {
+            $error = "Please provide a valid email and password.";
         } else {
+            $stmt = mysqli_prepare($conn, "SELECT * FROM users WHERE email = ? LIMIT 1");
+            mysqli_stmt_bind_param($stmt, 's', $email);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+            $user = $result ? mysqli_fetch_assoc($result) : null;
+            mysqli_stmt_close($stmt);
+
+            if ($user) {
+                $passwordMatches = password_verify($password, $user['password']) || hash_equals((string)$user['password'], (string)$password);
+
+                if ($passwordMatches) {
+                    if (!password_get_info((string)$user['password'])['algo']) {
+                        $newHash = password_hash($password, PASSWORD_DEFAULT);
+                        $updatePasswordStmt = mysqli_prepare($conn, "UPDATE users SET password = ? WHERE id = ?");
+                        mysqli_stmt_bind_param($updatePasswordStmt, 'si', $newHash, $user['id']);
+                        mysqli_stmt_execute($updatePasswordStmt);
+                        mysqli_stmt_close($updatePasswordStmt);
+                    }
+
+                    session_regenerate_id(true);
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['full_name'] = $user['full_name'];
+                    $name_parts = explode(' ', $user['full_name'], 2);
+                    $_SESSION['first_name'] = $name_parts[0];
+                    $_SESSION['last_name'] = isset($name_parts[1]) ? $name_parts[1] : '';
+                    $_SESSION['email'] = $user['email'];
+                    $_SESSION['role'] = $user['role'];
+
+                    if ($user['role'] == 'Admin') {
+                        header("Location: admin/dashboard.php");
+                    } else {
+                        header("Location: client/dashboard.php");
+                    }
+                    exit();
+                }
+            }
+
             $error = "Invalid email or password!";
         }
-    } else {
-        $error = "Invalid email or password!";
     }
 }
 ?>
@@ -512,6 +530,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <?php endif; ?>
 
             <form method="POST">
+                <?php echo csrfInput(); ?>
                 <div class="form-group">
                     <label>Email Address</label>
                     <div class="input-wrapper">

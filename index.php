@@ -1,3 +1,7 @@
+<?php
+include 'includes/security.php';
+setSecurityHeaders();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -736,6 +740,7 @@
             <a href="#home">Home</a>
             <a href="#services">Services</a>
             <a href="#about">About</a>
+            <a href="#faq">FAQ</a>
             <a href="contact.php">Contact</a>
             <a href="login.php" class="btn-login">Login</a>
             <a href="register.php" class="btn-register">Register</a>
@@ -908,6 +913,28 @@
             </div>
         </section>
 
+        <section id="faq" class="services-section">
+            <div class="section-header">
+                <span class="section-tag">Need Help?</span>
+                <h2>Frequently Asked Questions</h2>
+                <p>Quick answers for common AgriRMS usage questions</p>
+            </div>
+            <div class="services-grid">
+                <div class="service-card">
+                    <h3>How do I submit a service request?</h3>
+                    <p>Sign in as a client, open the Resources page, choose an available item, and submit your request with duration, delivery area, and schedule details.</p>
+                </div>
+                <div class="service-card">
+                    <h3>When can I make payment?</h3>
+                    <p>Payments become available after request approval. You can pay partially or fully and track due amount from your Payments dashboard.</p>
+                </div>
+                <div class="service-card">
+                    <h3>Can I save resources for later?</h3>
+                    <p>Yes. Use the Wishlist action from the Resources page to save equipment and return to it anytime.</p>
+                </div>
+            </div>
+        </section>
+
         <!-- CTA Section -->
         <section class="cta-section">
             <div class="cta-content">
@@ -935,7 +962,9 @@
                 <a href="#home">Home</a>
                 <a href="#services">Services</a>
                 <a href="#about">About</a>
+                <a href="#faq">FAQ</a>
                 <a href="contact.php">Contact</a>
+                <a href="terms.php">Terms</a>
             </div>
             <div class="footer-contact">
                 <h4>Contact Info</h4>

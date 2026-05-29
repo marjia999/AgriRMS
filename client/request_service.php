@@ -1,6 +1,11 @@
 <?php
 session_start();
 include '../database.php';
+include '../includes/security.php';
+include '../includes/notifications.php';
+
+setSecurityHeaders();
+ensureNotificationsTable($conn);
 
 // Check if user is logged in and is client
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
@@ -12,20 +17,23 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
 $pre_selected_resource = isset($_GET['resource_id']) ? (int)$_GET['resource_id'] : 0;
 
 // Get all resources for dropdown (only available)
-$resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' ORDER BY type, name");
+$resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' AND quantity > 0 ORDER BY type, name");
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $user_id = $_SESSION['user_id'];
-    $resource_id = mysqli_real_escape_string($conn, $_POST['resource_id']);
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Invalid request token. Please refresh and try again.';
+    } else {
+    $user_id = (int)$_SESSION['user_id'];
+    $resource_id = (int)($_POST['resource_id'] ?? 0);
     $quantity = (int)$_POST['quantity'];
-    $start_date = mysqli_real_escape_string($conn, $_POST['start_date']);
-    $end_date = mysqli_real_escape_string($conn, $_POST['end_date']);
-    $delivery_address = mysqli_real_escape_string($conn, $_POST['delivery_address']);
-    $delivery_district = mysqli_real_escape_string($conn, $_POST['delivery_district']);
-    $delivery_upazila = mysqli_real_escape_string($conn, $_POST['delivery_upazila']);
-    $rental_duration = mysqli_real_escape_string($conn, $_POST['rental_duration']);
-    $delivery_division = mysqli_real_escape_string($conn, $_POST['delivery_division']);
+    $start_date = $_POST['start_date'] ?? '';
+    $end_date = $_POST['end_date'] ?? '';
+    $delivery_address = cleanText($_POST['delivery_address'] ?? '', 255);
+    $delivery_district = cleanText($_POST['delivery_district'] ?? '', 80);
+    $delivery_upazila = cleanText($_POST['delivery_upazila'] ?? '', 80);
+    $rental_duration = $_POST['rental_duration'] ?? '';
+    $delivery_division = $_POST['delivery_division'] ?? '';
     
     // Calculate delivery fee and set delivery_id based on division
     if ($delivery_division == 'Dhaka') {
@@ -37,11 +45,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
     
     // Get resource details
-    $resource_query = mysqli_query($conn, "SELECT * FROM resources WHERE id = $resource_id");
+    $resource_stmt = mysqli_prepare($conn, "SELECT * FROM resources WHERE id = ? AND status = 'Available' AND quantity > 0");
+    mysqli_stmt_bind_param($resource_stmt, 'i', $resource_id);
+    mysqli_stmt_execute($resource_stmt);
+    $resource_query = mysqli_stmt_get_result($resource_stmt);
     $resource = mysqli_fetch_assoc($resource_query);
+    mysqli_stmt_close($resource_stmt);
     
     // Check if requested quantity is available
-    if ($quantity > $resource['quantity']) {
+    if (!$resource) {
+        $error = "Selected resource is currently unavailable.";
+    } elseif ($quantity < 1) {
+        $error = "Quantity must be at least 1 unit.";
+    } elseif ($quantity > $resource['quantity']) {
         $error = "Sorry, only {$resource['quantity']} unit(s) of this resource are available. Please reduce the quantity.";
     } else {
         // Calculate total based on rental duration type
@@ -57,22 +73,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $total_cost = $rental_cost + $delivery_fee;
         
         // Insert with delivery_id
-        $query = "INSERT INTO service_requests (user_id, resource_id, delivery_id, rental_duration, quantity, start_date, end_date, total_rental_cost, delivery_cost, total_cost, delivery_address, delivery_district, delivery_upazila, request_status, payment_status, created_at) 
-                  VALUES ('$user_id', '$resource_id', '$delivery_id', '$rental_duration', '$quantity', '$start_date', '$end_date', '$rental_cost', '$delivery_fee', '$total_cost', '$delivery_address', '$delivery_district', '$delivery_upazila', 'Pending', 'Pending', NOW())";
-        
-        if (mysqli_query($conn, $query)) {
+        $insert_request = mysqli_prepare($conn, "INSERT INTO service_requests (user_id, resource_id, delivery_id, rental_duration, quantity, start_date, end_date, total_rental_cost, delivery_cost, total_cost, delivery_address, delivery_district, delivery_upazila, request_status, payment_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 'Pending', NOW())");
+        mysqli_stmt_bind_param($insert_request, 'iiisissdddsss', $user_id, $resource_id, $delivery_id, $rental_duration, $quantity, $start_date, $end_date, $rental_cost, $delivery_fee, $total_cost, $delivery_address, $delivery_district, $delivery_upazila);
+
+        if (mysqli_stmt_execute($insert_request)) {
             $request_id = mysqli_insert_id($conn);
             
             // Create payment record
-            $payment_query = "INSERT INTO payments (user_id, booking_id, resource_id, delivery_id, payment_type, resource_cost, delivery_cost, total_amount, paid_amount, payment_status, created_at) 
-                              VALUES ('$user_id', '$request_id', '$resource_id', '$delivery_id', 'Rental', '$rental_cost', '$delivery_fee', '$total_cost', '0', 'Pending', NOW())";
-            mysqli_query($conn, $payment_query);
+            $payment_stmt = mysqli_prepare($conn, "INSERT INTO payments (user_id, booking_id, resource_id, delivery_id, payment_type, resource_cost, delivery_cost, total_amount, paid_amount, payment_status, created_at) VALUES (?, ?, ?, ?, 'Rental', ?, ?, ?, 0, 'Pending', NOW())");
+            mysqli_stmt_bind_param($payment_stmt, 'iiiiddd', $user_id, $request_id, $resource_id, $delivery_id, $rental_cost, $delivery_fee, $total_cost);
+            mysqli_stmt_execute($payment_stmt);
+            mysqli_stmt_close($payment_stmt);
+
+            createNotification($conn, $user_id, 'Request submitted', 'Your request #' . $request_id . ' has been submitted and is awaiting approval.', 'info', 'my_requests.php');
+            notifyAllAdmins($conn, 'New service request', 'Request #' . $request_id . ' has been submitted and needs review.', 'warning', 'service_requests.php');
             
             $success = "Request submitted successfully! We'll contact you soon.";
         } else {
             $error = "Failed to submit request. Please try again.";
         }
+        mysqli_stmt_close($insert_request);
     }
+}
 }
 ?>
 <!DOCTYPE html>
@@ -536,6 +558,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <a href="request_service.php">New Request</a>
             <a href="my_requests.php">My Requests</a>
             <a href="payments.php">Payments</a>
+            <a href="wishlist.php">Wishlist</a>
+            <a href="notifications.php">Notifications</a>
             <a href="profile.php">Profile</a>
             <a href="../logout.php" class="btn-logout">Logout</a>
         </nav>
@@ -557,6 +581,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <?php endif; ?>
 
                 <form method="POST" id="requestForm">
+                    <?php echo csrfInput(); ?>
                     <!-- ROW 1: Select Resource + Rental Duration -->
                     <div class="form-row">
                         <div class="form-group">
@@ -565,7 +590,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 <option value="">-- Select a resource --</option>
                                 <?php 
                                 $current_type = '';
-                                $resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' ORDER BY type, name");
+                                $resources_query = mysqli_query($conn, "SELECT * FROM resources WHERE status = 'Available' AND quantity > 0 ORDER BY type, name");
                                 while($resource = mysqli_fetch_assoc($resources_query)): 
                                     if($current_type != $resource['type']):
                                         if($current_type != '') echo '</optgroup>';

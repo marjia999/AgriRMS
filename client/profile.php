@@ -19,27 +19,57 @@ $error = '';
 $edit_mode = isset($_GET['edit']) ? true : false;
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $full_name = mysqli_real_escape_string($conn, $_POST['full_name']);
-    $phone = mysqli_real_escape_string($conn, $_POST['phone']);
-    $address = mysqli_real_escape_string($conn, $_POST['address']);
-    $email = mysqli_real_escape_string($conn, $_POST['email']);
-    
-    $check_email = mysqli_query($conn, "SELECT id FROM users WHERE email = '$email' AND id != $user_id");
-    if (mysqli_num_rows($check_email) > 0) {
-        $error = "Email already exists! Please use a different email.";
-    } else {
-        $update_query = "UPDATE users SET full_name='$full_name', email='$email', phone='$phone', address='$address' WHERE id=$user_id";
-        
-        if (mysqli_query($conn, $update_query)) {
-            $_SESSION['full_name'] = $full_name;
-            $_SESSION['email'] = $email;
-            $success = "Profile updated successfully!";
-            
-            $user_query = mysqli_query($conn, "SELECT * FROM users WHERE id = $user_id");
-            $user = mysqli_fetch_assoc($user_query);
-            $edit_mode = false;
+    if (isset($_POST['change_password'])) {
+        $current_password = $_POST['current_password'] ?? '';
+        $new_password = $_POST['new_password'] ?? '';
+        $confirm_password = $_POST['confirm_password'] ?? '';
+
+        $password_matches = password_verify($current_password, $user['password']);
+
+        if (!$password_matches) {
+            $error = "Current password is incorrect.";
+        } elseif (strlen($new_password) < 8) {
+            $error = "New password must be at least 8 characters.";
+        } elseif ($new_password !== $confirm_password) {
+            $error = "New password and confirm password do not match.";
         } else {
-            $error = "Failed to update profile. Please try again.";
+            $password_hash = password_hash($new_password, PASSWORD_DEFAULT);
+            $pass_stmt = mysqli_prepare($conn, "UPDATE users SET password = ? WHERE id = ?");
+            mysqli_stmt_bind_param($pass_stmt, 'si', $password_hash, $user_id);
+            if (mysqli_stmt_execute($pass_stmt)) {
+                $success = "Password changed successfully!";
+            } else {
+                $error = "Failed to change password. Please try again.";
+            }
+        }
+    } else {
+        $full_name = trim($_POST['full_name'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $address = trim($_POST['address'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+
+        $check_stmt = mysqli_prepare($conn, "SELECT id FROM users WHERE email = ? AND id != ?");
+        mysqli_stmt_bind_param($check_stmt, 'si', $email, $user_id);
+        mysqli_stmt_execute($check_stmt);
+        $check_email = mysqli_stmt_get_result($check_stmt);
+
+        if (mysqli_num_rows($check_email) > 0) {
+            $error = "Email already exists! Please use a different email.";
+        } else {
+            $update_stmt = mysqli_prepare($conn, "UPDATE users SET full_name = ?, email = ?, phone = ?, address = ? WHERE id = ?");
+            mysqli_stmt_bind_param($update_stmt, 'ssssi', $full_name, $email, $phone, $address, $user_id);
+
+            if (mysqli_stmt_execute($update_stmt)) {
+                $_SESSION['full_name'] = $full_name;
+                $_SESSION['email'] = $email;
+                $success = "Profile updated successfully!";
+
+                $user_query = mysqli_query($conn, "SELECT * FROM users WHERE id = $user_id");
+                $user = mysqli_fetch_assoc($user_query);
+                $edit_mode = false;
+            } else {
+                $error = "Failed to update profile. Please try again.";
+            }
         }
     }
 }
@@ -683,6 +713,31 @@ $completed_requests = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as
                 </div>
             </div>
             <?php endif; ?>
+            <div class="card" style="margin-top: 1.5rem;">
+                <div class="card-header">
+                    <div class="card-header-left">
+                        <i class="fas fa-key"></i>
+                        <h2>Change Password</h2>
+                    </div>
+                </div>
+                <form method="POST">
+                    <div class="form-group">
+                        <label>Current Password</label>
+                        <input type="password" name="current_password" required>
+                    </div>
+                    <div class="form-group">
+                        <label>New Password</label>
+                        <input type="password" name="new_password" minlength="8" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Confirm New Password</label>
+                        <input type="password" name="confirm_password" minlength="8" required>
+                    </div>
+                    <button type="submit" name="change_password" class="btn-update">
+                        <i class="fas fa-lock"></i> Update Password
+                    </button>
+                </form>
+            </div>
         </div>
     </div>
 

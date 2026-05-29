@@ -209,12 +209,96 @@ INSERT INTO `payments` (`user_id`, `booking_id`, `resource_id`, `delivery_id`, `
 (4, 4, 7, 2, 'Rental', 28000.00, 2500.00, 30500.00, 0.00, NULL, NULL, 'Pending', NULL);
 
 -- ============================================
+-- 7. CONTACT MESSAGES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `contact_messages` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `email` varchar(100) NOT NULL,
+  `subject` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `is_read` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ============================================
+-- 8. REQUEST COMMENTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `request_comments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `request_id` int(11) NOT NULL,
+  `admin_id` int(11) NOT NULL,
+  `comment` text NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_request_comments_request` (`request_id`),
+  CONSTRAINT `fk_request_comments_request` FOREIGN KEY (`request_id`) REFERENCES `service_requests` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_request_comments_admin` FOREIGN KEY (`admin_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ============================================
+-- 9. NOTIFICATIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `notifications` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `title` varchar(150) NOT NULL,
+  `message` text NOT NULL,
+  `type` enum('info','success','warning','error') DEFAULT 'info',
+  `related_url` varchar(255) DEFAULT NULL,
+  `is_read` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_notifications_user_read` (`user_id`, `is_read`, `created_at`),
+  CONSTRAINT `fk_notifications_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ============================================
+-- 10. RESOURCE WISHLIST TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `resource_wishlist` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `resource_id` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_wishlist_user_resource` (`user_id`, `resource_id`),
+  KEY `idx_wishlist_resource` (`resource_id`),
+  CONSTRAINT `fk_wishlist_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_wishlist_resource` FOREIGN KEY (`resource_id`) REFERENCES `resources` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- ============================================
+-- 11. RESOURCE REVIEWS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `resource_reviews` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `resource_id` int(11) NOT NULL,
+  `rating` tinyint(1) NOT NULL,
+  `review` varchar(500) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_review_user_resource` (`user_id`, `resource_id`),
+  KEY `idx_reviews_resource` (`resource_id`),
+  CONSTRAINT `fk_reviews_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_reviews_resource` FOREIGN KEY (`resource_id`) REFERENCES `resources` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_rating_range` CHECK (`rating` BETWEEN 1 AND 5)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+ALTER TABLE `resources`
+ADD COLUMN IF NOT EXISTS `next_maintenance_date` date DEFAULT NULL;
+
+-- ============================================
 -- ADD INDEXES FOR BETTER PERFORMANCE
 -- ============================================
 ALTER TABLE `service_requests` ADD INDEX `idx_user_dates` (`user_id`, `start_date`, `end_date`);
 ALTER TABLE `service_requests` ADD INDEX `idx_resource_status` (`resource_id`, `request_status`);
 ALTER TABLE `payments` ADD INDEX `idx_user_payment_status` (`user_id`, `payment_status`);
 ALTER TABLE `maintenance` ADD INDEX `idx_resource_maintenance` (`resource_id`, `maintenance_date`);
+ALTER TABLE `contact_messages` ADD INDEX `idx_contact_messages_created` (`created_at`);
 
 -- ============================================
 -- VERIFY ALL DATA

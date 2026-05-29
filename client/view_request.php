@@ -32,12 +32,17 @@ $payment_query = "SELECT * FROM payments WHERE booking_id = $request_id";
 $payment_result = mysqli_query($conn, $payment_query);
 $payment = mysqli_fetch_assoc($payment_result);
 
-// Handle cancellation
-if (isset($_POST['cancel_request'])) {
-    $reason = mysqli_real_escape_string($conn, $_POST['cancellation_reason']);
-    mysqli_query($conn, "UPDATE service_requests SET request_status = 'Cancelled' WHERE id = $request_id");
-    header("Location: view_request.php?id=$request_id&cancelled=1");
-    exit();
+// Handle cancellation (pending requests only)
+if (isset($_POST['cancel_request']) && $request['request_status'] === 'Pending') {
+    $reason = trim($_POST['cancellation_reason'] ?? '');
+    if ($reason !== '') {
+        $updated_instruction = trim(($request['special_instructions'] ?? '') . "\n[Cancellation Reason] " . $reason);
+        $cancel_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = 'Cancelled', special_instructions = ? WHERE id = ?");
+        mysqli_stmt_bind_param($cancel_stmt, 'si', $updated_instruction, $request_id);
+        mysqli_stmt_execute($cancel_stmt);
+        header("Location: view_request.php?id=$request_id&cancelled=1");
+        exit();
+    }
 }
 
 // Handle update request (only if can edit)
@@ -456,6 +461,17 @@ if (isset($_POST['update_request']) && $can_edit) {
                 </div>
             </div>
 
+            <div class="card">
+                <h2><i class="fas fa-route"></i> Tracking Timeline</h2>
+                <div class="info-grid" style="grid-template-columns: repeat(1, 1fr);">
+                    <div class="info-item"><label>1. Request Submitted</label><div class="value"><?php echo date('M d, Y h:i A', strtotime($request['created_at'])); ?></div></div>
+                    <div class="info-item"><label>2. Approved</label><div class="value"><?php echo $request['approved_at'] ? date('M d, Y h:i A', strtotime($request['approved_at'])) : 'Waiting for admin approval'; ?></div></div>
+                    <div class="info-item"><label>3. Delivered</label><div class="value"><?php echo $request['delivered_at'] ? date('M d, Y h:i A', strtotime($request['delivered_at'])) : ($request['request_status'] === 'Delivered' ? 'Out for delivery' : 'Not delivered yet'); ?></div></div>
+                    <div class="info-item"><label>4. Returned / Completed</label><div class="value"><?php echo $request['returned_at'] ? date('M d, Y h:i A', strtotime($request['returned_at'])) : 'Not completed yet'; ?></div></div>
+                    <div class="info-item"><label>Delivery Status</label><div class="value"><?php echo in_array($request['request_status'], ['Processing', 'Delivered'], true) ? 'In transit' : ($request['request_status'] === 'Returned' ? 'Returned' : ($request['request_status'] === 'Cancelled' ? 'Cancelled' : 'Pending dispatch')); ?></div></div>
+                </div>
+            </div>
+
             <?php if($can_edit): ?>
                 <div class="card">
                     <h2><i class="fas fa-edit"></i> Edit Request</h2>
@@ -490,6 +506,7 @@ if (isset($_POST['update_request']) && $can_edit) {
                     </form>
                 </div>
 
+                <?php if($request['request_status'] === 'Pending'): ?>
                 <div class="card">
                     <h2><i class="fas fa-ban"></i> Cancel Request</h2>
                     <form method="POST" onsubmit="return confirm('Are you sure you want to cancel this request? This action cannot be undone.');">
@@ -502,6 +519,7 @@ if (isset($_POST['update_request']) && $can_edit) {
                         </button>
                     </form>
                 </div>
+                <?php endif; ?>
             <?php endif; ?>
 
             <div style="text-align: center; margin-top: 1rem;">

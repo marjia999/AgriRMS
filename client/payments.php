@@ -1,6 +1,11 @@
 <?php
 session_start();
 include '../database.php';
+include '../includes/security.php';
+include '../includes/notifications.php';
+
+setSecurityHeaders();
+ensureNotificationsTable($conn);
 
 // Check if user is logged in and is client
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
@@ -12,17 +17,21 @@ $user_id = $_SESSION['user_id'];
 
 // Handle payment submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['make_payment'])) {
-    $payment_id = $_POST['payment_id'];
-    $payment_method = mysqli_real_escape_string($conn, $_POST['payment_method']);
-    $transaction_id = mysqli_real_escape_string($conn, $_POST['transaction_id']);
-    $paid_amount = mysqli_real_escape_string($conn, $_POST['paid_amount']);
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Invalid request token. Please refresh and try again.';
+    } else {
+    $payment_id = (int)($_POST['payment_id'] ?? 0);
+    $payment_method = $_POST['payment_method'] ?? '';
+    $transaction_id = cleanText($_POST['transaction_id'] ?? '', 100);
+    $paid_amount = (float)($_POST['paid_amount'] ?? 0);
     
     // Get payment details with request status
-    $payment_query = mysqli_query($conn, "SELECT p.*, sr.request_status 
-                                          FROM payments p 
-                                          JOIN service_requests sr ON p.booking_id = sr.id 
-                                          WHERE p.id = $payment_id AND p.user_id = $user_id");
+    $payment_stmt = mysqli_prepare($conn, "SELECT p.*, sr.request_status FROM payments p JOIN service_requests sr ON p.booking_id = sr.id WHERE p.id = ? AND p.user_id = ?");
+    mysqli_stmt_bind_param($payment_stmt, 'ii', $payment_id, $user_id);
+    mysqli_stmt_execute($payment_stmt);
+    $payment_query = mysqli_stmt_get_result($payment_stmt);
     $payment = mysqli_fetch_assoc($payment_query);
+    mysqli_stmt_close($payment_stmt);
     
     if ($payment) {
         $allowed_statuses = ['Approved', 'Delivered', 'Returned'];
@@ -44,25 +53,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['make_payment'])) {
                 $transaction_id = null;
             }
             
-            $update_query = "UPDATE payments SET 
-                             paid_amount = '$new_paid_amount',
-                             due_amount = '$new_due_amount',
-                             payment_status = '$payment_status',
-                             payment_method = '$payment_method',
-                             transaction_id = " . ($transaction_id ? "'$transaction_id'" : "NULL") . ",
-                             payment_date = NOW()
-                             WHERE id = $payment_id";
-            
-            if (mysqli_query($conn, $update_query)) {
-                mysqli_query($conn, "UPDATE service_requests SET payment_status = '$payment_status' WHERE id = " . $payment['booking_id']);
+            $transaction_for_db = $transaction_id !== '' ? $transaction_id : null;
+            $update_stmt = mysqli_prepare($conn, "UPDATE payments SET paid_amount = ?, payment_status = ?, payment_method = ?, transaction_id = ?, payment_date = NOW() WHERE id = ?");
+            mysqli_stmt_bind_param($update_stmt, 'dsssi', $new_paid_amount, $payment_status, $payment_method, $transaction_for_db, $payment_id);
+
+            if (mysqli_stmt_execute($update_stmt)) {
+                $booking_id = (int)$payment['booking_id'];
+                $request_stmt = mysqli_prepare($conn, "UPDATE service_requests SET payment_status = ? WHERE id = ?");
+                mysqli_stmt_bind_param($request_stmt, 'si', $payment_status, $booking_id);
+                mysqli_stmt_execute($request_stmt);
+                mysqli_stmt_close($request_stmt);
+
+                createNotification($conn, $user_id, 'Payment received', 'Your payment of ৳ ' . number_format($paid_amount, 2) . ' was recorded for booking #' . $booking_id . '.', 'success', '../invoice.php?payment_id=' . $payment_id);
+                notifyAllAdmins($conn, 'Client payment submitted', 'Payment #' . $payment_id . ' was updated by the client.', 'info', 'billing.php');
                 $success = "Payment of ৳ " . number_format($paid_amount, 2) . " has been recorded successfully!";
             } else {
                 $error = "Payment failed. Please try again.";
             }
+            mysqli_stmt_close($update_stmt);
         }
     } else {
         $error = "Invalid payment record.";
     }
+}
 }
 
 // Get all payments for this user
@@ -508,6 +521,8 @@ $total_transactions = mysqli_num_rows($payments);
             <a href="request_service.php">New Request</a>
             <a href="my_requests.php">My Requests</a>
             <a href="payments.php">Payments</a>
+            <a href="wishlist.php">Wishlist</a>
+            <a href="notifications.php">Notifications</a>
             <a href="profile.php">Profile</a>
             <a href="../logout.php" class="btn-logout">Logout</a>
         </nav>
@@ -580,6 +595,9 @@ $total_transactions = mysqli_num_rows($payments);
                                 <button class="btn-pay" onclick="openPaymentModal(<?php echo $row['id']; ?>, <?php echo $row['due_amount']; ?>)">
                                     <i class="fas fa-credit-card"></i> Pay Now
                                 </button>
+                                <a class="btn-view" style="margin-top:6px;display:inline-block;" href="../invoice.php?payment_id=<?php echo (int)$row['id']; ?>">
+                                    <i class="fas fa-file-invoice"></i> Invoice
+                                </a>
                             </td>
                         </tr>
                         <?php endwhile; ?>
@@ -618,6 +636,9 @@ $total_transactions = mysqli_num_rows($payments);
                                 <button class="btn-pay" disabled style="background: #ccc;">
                                     <i class="fas fa-lock"></i> Wait for Approval
                                 </button>
+                                <a class="btn-view" style="margin-top:6px;display:inline-block;" href="../invoice.php?payment_id=<?php echo (int)$row['id']; ?>">
+                                    <i class="fas fa-file-invoice"></i> Invoice
+                                </a>
                             </td>
                         </tr>
                         <?php endwhile; ?>
@@ -710,6 +731,7 @@ $total_transactions = mysqli_num_rows($payments);
             <h3><i class="fas fa-credit-card"></i> Make Payment</h3>
             <form method="POST" id="paymentForm">
                 <input type="hidden" name="payment_id" id="payment_id">
+                <?php echo csrfInput(); ?>
                 <input type="hidden" name="paid_amount" id="paid_amount">
                 
                 <div class="form-group">

@@ -10,6 +10,21 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Client') {
 
 $user_id = $_SESSION['user_id'];
 
+
+$success = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_pending'])) {
+    $request_id = (int)($_POST['request_id'] ?? 0);
+    if ($request_id > 0) {
+        $cancel_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = 'Cancelled' WHERE id = ? AND user_id = ? AND request_status = 'Pending'");
+        mysqli_stmt_bind_param($cancel_stmt, 'ii', $request_id, $user_id);
+        mysqli_stmt_execute($cancel_stmt);
+        if (mysqli_stmt_affected_rows($cancel_stmt) > 0) {
+            $success = 'Pending request cancelled successfully.';
+        }
+    }
+}
+
 // Get all service requests for this client with correct column names
 $requests_query = "SELECT sr.*, r.name as resource_name, r.model, r.daily_rate, r.type as resource_type
                    FROM service_requests sr 
@@ -537,6 +552,10 @@ $completed = mysqli_fetch_assoc($completed_query)['completed'];
         </div>
 
         <!-- Requests Grid -->
+        <?php if(!empty($success)): ?>
+        <div style="background:#d4edda;color:#155724;padding:12px 16px;border-radius:12px;margin-bottom:16px;"><i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($success); ?></div>
+        <?php endif; ?>
+
         <?php if($requests && mysqli_num_rows($requests) > 0): ?>
         <div class="requests-grid">
             <?php while($row = mysqli_fetch_assoc($requests)): 
@@ -592,7 +611,14 @@ $completed = mysqli_fetch_assoc($completed_query)['completed'];
                         <a href="view_request.php?id=<?php echo $row['id']; ?>" class="btn-view">
                             <i class="fas fa-eye"></i> View Details
                         </a>
-                        <?php if($row['request_status'] == 'Returned'): ?>
+                        <?php if($row['request_status'] == 'Pending'): ?>
+                            <form method="POST" style="display:inline;" onsubmit="return confirm('Cancel this pending request?');">
+                                <input type="hidden" name="request_id" value="<?php echo (int)$row['id']; ?>">
+                                <button type="submit" name="cancel_pending" class="btn-pay" style="background:#dc3545; border:none; cursor:pointer;">
+                                    <i class="fas fa-times-circle"></i> Cancel
+                                </button>
+                            </form>
+                        <?php elseif($row['request_status'] == 'Returned'): ?>
                             <a href="payments.php?request_id=<?php echo $row['id']; ?>" class="btn-pay">
                                 <i class="fas fa-credit-card"></i> Pay Now
                             </a>

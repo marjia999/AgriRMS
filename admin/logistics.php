@@ -10,32 +10,90 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'Admin') {
 
 // Assign resource to request and create delivery
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_resource'])) {
-    $request_id = $_POST['request_id'];
-    $resource_id = $_POST['resource_id'];
-    $delivery_id = $_POST['delivery_id'];
-    $start_date = $_POST['start_date'];
-    $end_date = $_POST['end_date'];
-    $delivery_fee = $_POST['delivery_fee'];
-    
-    // Update service request with delivery info and status
-    mysqli_query($conn, "UPDATE service_requests SET 
-                        start_date = '$start_date',
-                        end_date = '$end_date',
-                        request_status = 'Processing'
-                        WHERE id = $request_id");
-    
-    // Update resource status to Rented
-    mysqli_query($conn, "UPDATE resources SET status = 'Rented' WHERE id = $resource_id");
-    
-    header("Location: logistics.php?success=assigned");
+    $request_id = (int)($_POST['request_id'] ?? 0);
+    $resource_id = (int)($_POST['resource_id'] ?? 0);
+    $delivery_id = (int)($_POST['delivery_id'] ?? 0);
+    $start_date = $_POST['start_date'] ?? '';
+    $end_date = $_POST['end_date'] ?? '';
+
+    mysqli_begin_transaction($conn);
+
+    $req_stmt = mysqli_prepare($conn, "SELECT quantity, request_status FROM service_requests WHERE id = ? AND resource_id = ? FOR UPDATE");
+    mysqli_stmt_bind_param($req_stmt, 'ii', $request_id, $resource_id);
+    mysqli_stmt_execute($req_stmt);
+    $req = mysqli_fetch_assoc(mysqli_stmt_get_result($req_stmt));
+
+    if ($req && $req['request_status'] === 'Approved') {
+        $requested_qty = (int)$req['quantity'];
+
+        $res_stmt = mysqli_prepare($conn, "SELECT quantity, status FROM resources WHERE id = ? FOR UPDATE");
+        mysqli_stmt_bind_param($res_stmt, 'i', $resource_id);
+        mysqli_stmt_execute($res_stmt);
+        $res = mysqli_fetch_assoc(mysqli_stmt_get_result($res_stmt));
+
+        if ($res && (int)$res['quantity'] >= $requested_qty && $res['status'] !== 'Under Maintenance') {
+            $update_req = mysqli_prepare($conn, "UPDATE service_requests SET delivery_id = ?, start_date = ?, end_date = ?, request_status = 'Processing' WHERE id = ?");
+            mysqli_stmt_bind_param($update_req, 'issi', $delivery_id, $start_date, $end_date, $request_id);
+            mysqli_stmt_execute($update_req);
+
+            $new_quantity = max(((int)$res['quantity']) - $requested_qty, 0);
+            $new_status = $new_quantity <= 0 ? 'Rented' : 'Available';
+            $update_res = mysqli_prepare($conn, "UPDATE resources SET quantity = ?, status = ? WHERE id = ?");
+            mysqli_stmt_bind_param($update_res, 'isi', $new_quantity, $new_status, $resource_id);
+            mysqli_stmt_execute($update_res);
+
+            mysqli_commit($conn);
+            header("Location: logistics.php?success=assigned");
+            exit();
+        }
+    }
+
+    mysqli_rollback($conn);
+    header("Location: logistics.php?error=assign_failed");
     exit();
 }
 
 // Update delivery status
 if (isset($_POST['update_delivery_status'])) {
-    $request_id = $_POST['request_id'];
-    $status = $_POST['status'];
-    mysqli_query($conn, "UPDATE service_requests SET request_status = '$status' WHERE id = $request_id");
+    $request_id = (int)($_POST['request_id'] ?? 0);
+    $status = $_POST['status'] ?? '';
+    $allowed_status = ['Processing', 'Delivered', 'Returned', 'Cancelled'];
+
+    if ($request_id > 0 && in_array($status, $allowed_status, true)) {
+        mysqli_begin_transaction($conn);
+
+        $req_stmt = mysqli_prepare($conn, "SELECT resource_id, quantity, request_status FROM service_requests WHERE id = ? FOR UPDATE");
+        mysqli_stmt_bind_param($req_stmt, 'i', $request_id);
+        mysqli_stmt_execute($req_stmt);
+        $req = mysqli_fetch_assoc(mysqli_stmt_get_result($req_stmt));
+
+        if ($req) {
+            $resource_id = (int)$req['resource_id'];
+            $requested_qty = (int)$req['quantity'];
+            $old_status = $req['request_status'];
+
+            if (in_array($old_status, ['Processing', 'Delivered'], true) && in_array($status, ['Returned', 'Cancelled'], true)) {
+                $release_stmt = mysqli_prepare($conn, "UPDATE resources SET quantity = quantity + ?, status = CASE WHEN quantity + ? > 0 THEN 'Available' ELSE status END WHERE id = ? AND status != 'Under Maintenance'");
+                mysqli_stmt_bind_param($release_stmt, 'iii', $requested_qty, $requested_qty, $resource_id);
+                mysqli_stmt_execute($release_stmt);
+            }
+
+            if ($status === 'Delivered') {
+                $update_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = ?, delivered_at = NOW() WHERE id = ?");
+            } elseif ($status === 'Returned') {
+                $update_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = ?, returned_at = NOW() WHERE id = ?");
+            } else {
+                $update_stmt = mysqli_prepare($conn, "UPDATE service_requests SET request_status = ? WHERE id = ?");
+            }
+            mysqli_stmt_bind_param($update_stmt, 'si', $status, $request_id);
+            mysqli_stmt_execute($update_stmt);
+
+            mysqli_commit($conn);
+        } else {
+            mysqli_rollback($conn);
+        }
+    }
+
     header("Location: logistics.php");
     exit();
 }
@@ -778,6 +836,7 @@ $returned = $returned_query ? mysqli_fetch_assoc($returned_query)['returned'] : 
                                         <option value="Processing" <?php echo $row['request_status'] == 'Processing' ? 'selected' : ''; ?>>Processing</option>
                                         <option value="Delivered" <?php echo $row['request_status'] == 'Delivered' ? 'selected' : ''; ?>>Delivered</option>
                                         <option value="Returned" <?php echo $row['request_status'] == 'Returned' ? 'selected' : ''; ?>>Returned</option>
+                                        <option value="Cancelled" <?php echo $row['request_status'] == 'Cancelled' ? 'selected' : ''; ?>>Cancelled</option>
                                     </select>
                                     <button type="submit" name="update_delivery_status" class="btn-update">
                                         <i class="fas fa-sync-alt"></i> Update

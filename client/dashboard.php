@@ -23,7 +23,7 @@ $user_data = mysqli_fetch_assoc($user_result);
 
 // Fix: Use correct column names from your database schema
 // service_requests table has: user_id (not client_id), request_status (not status), created_at (not request_date)
-$total_requests_query = "SELECT COUNT(*) as count FROM service_requests WHERE user_id = $user_id";
+$total_requests_query = "SELECT COUNT(*) as count FROM service_requests WHERE user_id = $user_id AND request_status IN ('Approved','Processing','Delivered')";
 $total_requests_result = mysqli_query($conn, $total_requests_query);
 $total_requests = $total_requests_result ? mysqli_fetch_assoc($total_requests_result)['count'] : 0;
 
@@ -31,7 +31,7 @@ $pending_requests_query = "SELECT COUNT(*) as count FROM service_requests WHERE 
 $pending_requests_result = mysqli_query($conn, $pending_requests_query);
 $pending_requests = $pending_requests_result ? mysqli_fetch_assoc($pending_requests_result)['count'] : 0;
 
-$approved_requests_query = "SELECT COUNT(*) as count FROM service_requests WHERE user_id = $user_id AND request_status = 'Approved'";
+$approved_requests_query = "SELECT COUNT(*) as count FROM service_requests WHERE user_id = $user_id AND request_status IN ('Approved','Processing','Delivered')";
 $approved_requests_result = mysqli_query($conn, $approved_requests_query);
 $approved_requests = $approved_requests_result ? mysqli_fetch_assoc($approved_requests_result)['count'] : 0;
 
@@ -66,7 +66,7 @@ $total_available = $total_available_result ? mysqli_fetch_assoc($total_available
 $recent_requests_query = "SELECT sr.*, r.name as resource_name, r.type as resource_type 
                           FROM service_requests sr 
                           LEFT JOIN resources r ON sr.resource_id = r.id 
-                          WHERE sr.user_id = $user_id 
+                          WHERE sr.user_id = $user_id AND sr.request_status IN ('Approved','Processing','Delivered') 
                           ORDER BY sr.created_at DESC 
                           LIMIT 5";
 $recent_requests = mysqli_query($conn, $recent_requests_query);
@@ -768,14 +768,14 @@ if (!$recent_requests) {
                         <i class="fas fa-clipboard-list"></i>
                     </div>
                     <div class="stat-number"><?php echo $total_requests; ?></div>
-                    <div class="stat-label">Total Requests</div>
+                    <div class="stat-label">Active Requests</div>
                 </div>
                 <div class="welcome-stat-item">
                     <div class="stat-icon-wrapper">
                         <i class="fas fa-check-circle"></i>
                     </div>
                     <div class="stat-number"><?php echo $approved_requests; ?></div>
-                    <div class="stat-label">Approved</div>
+                    <div class="stat-label">Approved/Active</div>
                 </div>
                 <div class="welcome-stat-item">
                     <div class="stat-icon-wrapper">
