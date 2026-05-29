@@ -321,6 +321,3 @@ SELECT id, user_id, resource_id, rental_duration, total_cost, request_status FRO
 SELECT '=== PAYMENTS ===' as '';
 SELECT id, user_id, booking_id, total_amount, paid_amount, payment_status FROM payments;
 
--- ============================================
--- COMPLETE DATABASE SETUP FINISHED
--- ============================================
