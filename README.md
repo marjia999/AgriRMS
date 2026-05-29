@@ -26,7 +26,3 @@ Client - Can view personal dashboard, submit service requests for resources, tra
 - **Backend:** PHP  
 - **Database:** MySQL
 
-## Optional Environment Variables
-
-- `AGRI_ADMIN_EMAIL` - recipient email for contact form submissions.
-- `AGRI_BASE_URL` - absolute base URL (for example `https://example.com`) used to generate clickable invoice links in outgoing emails.
