@@ -24,3 +24,14 @@ function sendPlatformEmail(string $to, string $subject, string $body, ?string $r
 
     return mail($safeTo, $safeSubject, $body, $headers);
 }
+
+function appUrl(string $path): string {
+    $normalizedPath = '/' . ltrim($path, '/');
+    $baseUrl = rtrim((string)getenv('AGRI_BASE_URL'), '/');
+
+    if ($baseUrl !== '' && filter_var($baseUrl, FILTER_VALIDATE_URL)) {
+        return $baseUrl . $normalizedPath;
+    }
+
+    return $normalizedPath;
+}

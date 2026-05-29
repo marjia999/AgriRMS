@@ -50,7 +50,7 @@ if (isset($_POST['update_payment'])) {
 
         if ($payment) {
             $user_id = (int)$payment['user_id'];
-            $invoiceUrl = '../invoice.php?payment_id=' . $payment_id;
+            $invoiceUrl = appUrl('invoice.php?payment_id=' . $payment_id);
             createNotification($conn, $user_id, 'Payment status updated', 'Payment #' . $payment_id . ' is now marked as ' . $payment_status . '.', $payment_status === 'Paid' ? 'success' : 'info', '../invoice.php?payment_id=' . $payment_id);
 
             if (!empty($payment['email']) && filter_var($payment['email'], FILTER_VALIDATE_EMAIL)) {

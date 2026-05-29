@@ -61,15 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email_invoice'])) {
             $email_error = 'Please provide a valid recipient email address.';
         } else {
             $subject = 'AgriRMS Invoice #' . str_pad((string)$invoice['id'], 5, '0', STR_PAD_LEFT);
+            $invoiceUrl = appUrl('invoice.php?payment_id=' . (int)$invoice['id']);
             $message = "Hello " . ($invoice['full_name'] ?? 'Client') . ",\n\n" .
                 "Your invoice details are ready.\n" .
                 "Invoice ID: #" . str_pad((string)$invoice['id'], 5, '0', STR_PAD_LEFT) . "\n" .
                 "Status: " . ($invoice['payment_status'] ?? 'Pending') . "\n" .
                 "Total: ৳ " . number_format((float)$invoice['total_amount'], 2) . "\n" .
                 "Due: ৳ " . number_format((float)$invoice['due_amount'], 2) . "\n\n" .
-                "You can view it here: " .
-                ((isset($_SERVER['HTTP_HOST']) ? (($_SERVER['HTTPS'] ?? 'off') !== 'off' ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'] : '') .
-                    '/invoice.php?payment_id=' . (int)$invoice['id']) . "\n\n" .
+                "You can view it from your AgriRMS dashboard or directly at: {$invoiceUrl}\n\n" .
                 "Regards,\nAgriRMS";
 
             if (sendPlatformEmail($recipient, $subject, $message)) {
