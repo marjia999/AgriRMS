@@ -2,6 +2,7 @@
 session_start();
 include 'database.php';
 include 'includes/security.php';
+include 'includes/mailer.php';
 
 setSecurityHeaders();
 
@@ -13,6 +14,8 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = (int)$_SESSION['user_id'];
 $is_admin = ($_SESSION['role'] ?? '') === 'Admin';
 $payment_id = (int)($_GET['payment_id'] ?? 0);
+$email_status = '';
+$email_error = '';
 
 if ($payment_id <= 0) {
     http_response_code(400);
@@ -47,6 +50,37 @@ if (!$is_admin && (int)$invoice['user_id'] !== $user_id) {
     exit();
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email_invoice'])) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $email_error = 'Invalid request token. Please refresh and try again.';
+    } else {
+        $recipient = $is_admin
+            ? trim($_POST['recipient_email'] ?? '')
+            : (string)($invoice['email'] ?? '');
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            $email_error = 'Please provide a valid recipient email address.';
+        } else {
+            $subject = 'AgriRMS Invoice #' . str_pad((string)$invoice['id'], 5, '0', STR_PAD_LEFT);
+            $message = "Hello " . ($invoice['full_name'] ?? 'Client') . ",\n\n" .
+                "Your invoice details are ready.\n" .
+                "Invoice ID: #" . str_pad((string)$invoice['id'], 5, '0', STR_PAD_LEFT) . "\n" .
+                "Status: " . ($invoice['payment_status'] ?? 'Pending') . "\n" .
+                "Total: ৳ " . number_format((float)$invoice['total_amount'], 2) . "\n" .
+                "Due: ৳ " . number_format((float)$invoice['due_amount'], 2) . "\n\n" .
+                "You can view it here: " .
+                ((isset($_SERVER['HTTP_HOST']) ? (($_SERVER['HTTPS'] ?? 'off') !== 'off' ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'] : '') .
+                    '/invoice.php?payment_id=' . (int)$invoice['id']) . "\n\n" .
+                "Regards,\nAgriRMS";
+
+            if (sendPlatformEmail($recipient, $subject, $message)) {
+                $email_status = 'Invoice email has been sent successfully.';
+            } else {
+                $email_error = 'Unable to send invoice email right now.';
+            }
+        }
+    }
+}
+
 $home = $is_admin ? 'admin/billing.php' : 'client/payments.php';
 ?>
 <!DOCTYPE html>
@@ -75,6 +109,12 @@ $home = $is_admin ? 'admin/billing.php' : 'client/payments.php';
         .btn { border: none; border-radius: 10px; padding: .7rem 1rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
         .btn-print { background: #FF8C42; color: #fff; }
         .btn-back { background: #1B4F2B; color: #fff; }
+        .btn-email { background: #2e7d32; color: #fff; }
+        .alert { border-radius: 10px; padding: .7rem .9rem; margin-top: 1rem; }
+        .alert-ok { background: #e7f6ea; color: #1f6f2f; border: 1px solid #b8e3c2; }
+        .alert-err { background: #fdecec; color: #a52a2a; border: 1px solid #f4b7b7; }
+        .email-form { margin-top: 1rem; display: flex; gap: .6rem; flex-wrap: wrap; }
+        .email-form input { border: 1px solid #d5e7d5; border-radius: 10px; padding: .6rem .7rem; min-width: 260px; }
         @media print { .actions { display: none; } body { background: #fff; } .container { margin: 0; box-shadow: none; } }
         @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .meta { text-align: left; } }
     </style>
@@ -139,6 +179,17 @@ $home = $is_admin ? 'admin/billing.php' : 'client/payments.php';
         <button class="btn btn-print" onclick="window.print()">Print / Save as PDF</button>
         <a class="btn btn-back" href="<?php echo $home; ?>">Back</a>
     </div>
+
+    <?php if ($email_status): ?><div class="alert alert-ok"><?php echo htmlspecialchars($email_status); ?></div><?php endif; ?>
+    <?php if ($email_error): ?><div class="alert alert-err"><?php echo htmlspecialchars($email_error); ?></div><?php endif; ?>
+
+    <form method="post" class="email-form">
+        <?php echo csrfInput(); ?>
+        <?php if ($is_admin): ?>
+            <input type="email" name="recipient_email" value="<?php echo htmlspecialchars($invoice['email'] ?? ''); ?>" placeholder="Recipient email" required>
+        <?php endif; ?>
+        <button class="btn btn-email" type="submit" name="email_invoice">Email Invoice</button>
+    </form>
 </div>
 </body>
 </html>

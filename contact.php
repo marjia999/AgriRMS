@@ -1,39 +1,46 @@
 <?php
 include 'includes/session.php';
 include 'database.php';
+include 'includes/security.php';
+include 'includes/mailer.php';
+
+setSecurityHeaders();
 
 $success = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name = trim($_POST['name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $subject = trim($_POST['subject'] ?? '');
-    $message = trim($_POST['message'] ?? '');
-
-    if ($name === '' || $email === '' || $subject === '' || $message === '') {
-        $error = 'All fields are required.';
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $error = 'Please provide a valid email address.';
+    if (!validateCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Invalid request token. Please refresh and try again.';
     } else {
-        $stmt = mysqli_prepare($conn, 'INSERT INTO contact_messages (name, email, subject, message) VALUES (?, ?, ?, ?)');
-        if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'ssss', $name, $email, $subject, $message);
-            if (mysqli_stmt_execute($stmt)) {
-                $to = getenv('AGRI_ADMIN_EMAIL') ?: '';
-                $safe_subject = str_replace(["\r", "\n"], ' ', $subject);
-                $mail_subject = 'New Contact Message: ' . $safe_subject;
-                $mail_body = "Name: $name\nEmail: $email\n\nMessage:\n$message";
-                $safe_reply_to = str_replace(["\r", "\n"], '', $email);
-                if ($to !== '' && filter_var($safe_reply_to, FILTER_VALIDATE_EMAIL)) {
-                    mail($to, $mail_subject, $mail_body, "From: noreply@agrirms.com\r\nReply-To: $safe_reply_to");
-                }
-                $success = 'Thanks! Your message was sent successfully.';
-            } else {
-                $error = 'Failed to save your message. Please try again.';
-            }
+        $name = cleanText($_POST['name'] ?? '', 100);
+        $email = trim($_POST['email'] ?? '');
+        $subject = cleanText($_POST['subject'] ?? '', 255);
+        $message = cleanText($_POST['message'] ?? '', 3000);
+
+        if ($name === '' || $email === '' || $subject === '' || $message === '') {
+            $error = 'All fields are required.';
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Please provide a valid email address.';
         } else {
-            $error = 'Contact messages table is missing. Please update database schema.';
+            $stmt = mysqli_prepare($conn, 'INSERT INTO contact_messages (name, email, subject, message) VALUES (?, ?, ?, ?)');
+            if ($stmt) {
+                mysqli_stmt_bind_param($stmt, 'ssss', $name, $email, $subject, $message);
+                if (mysqli_stmt_execute($stmt)) {
+                    $to = getenv('AGRI_ADMIN_EMAIL') ?: '';
+                    $mail_subject = 'New Contact Message: ' . $subject;
+                    $mail_body = "Name: $name\nEmail: $email\n\nMessage:\n$message";
+                    if ($to !== '') {
+                        sendPlatformEmail($to, $mail_subject, $mail_body, $email);
+                    }
+                    $success = 'Thanks! Your message was sent successfully.';
+                } else {
+                    $error = 'Failed to save your message. Please try again.';
+                }
+                mysqli_stmt_close($stmt);
+            } else {
+                $error = 'Contact messages table is missing. Please update database schema.';
+            }
         }
     }
 }
@@ -67,7 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <nav>
         <a href="index.php">Home</a>
         <a href="index.php#about">About</a>
-        <a href="index.php#faq">FAQ</a>
+        <a href="faq.php">FAQ</a>
+        <a href="terms.php">Terms</a>
         <?php if (isLoggedIn()): ?>
             <a href="<?php echo isAdmin() ? 'admin/dashboard.php' : 'client/dashboard.php'; ?>">Dashboard</a>
             <a href="logout.php">Logout</a>
@@ -87,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php if ($error): ?><div class="alert err"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
         <form method="POST">
+            <?php echo csrfInput(); ?>
             <div class="grid">
                 <div class="field">
                     <label>Name</label>
