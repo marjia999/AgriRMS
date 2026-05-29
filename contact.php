@@ -1,3 +1,4 @@
+//this is contact page
 <?php
 include 'includes/session.php';
 include 'database.php';
